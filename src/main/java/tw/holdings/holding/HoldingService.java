@@ -7,29 +7,53 @@ import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tw.holdings.quote.QuoteResult;
+import tw.holdings.quote.QuoteService;
 
 @Service
-@Transactional(readOnly = true)
 class HoldingService {
     private final HoldingRepository repository;
+    private final QuoteService quotes;
 
-    HoldingService(HoldingRepository repository) {
+    HoldingService(HoldingRepository repository, QuoteService quotes) {
         this.repository = repository;
+        this.quotes = quotes;
     }
 
-    List<HoldingDetails> list() {
-        return repository.findAllByOrderByIdAsc().stream().map(Holding::toDetails).toList();
+    List<HoldingQuoteView> list() {
+        return repository.findAllByOrderByIdAsc().stream()
+                .map(Holding::toDetails)
+                .map(this::withQuote)
+                .toList();
+    }
+
+    private HoldingQuoteView withQuote(HoldingDetails holding) {
+        QuoteResult quote = quotes.lookup(holding.code(), holding.market());
+        boolean found = quote.status() == QuoteResult.Status.FOUND;
+        String name = found ? quote.name() : holding.name();
+        var market = found ? quote.market() : holding.market();
+        if (found && (holding.name() == null || holding.market() == null)) {
+            repository.fillMissingIdentity(holding.id(), name, market);
+        }
+        return new HoldingQuoteView(holding.id(), holding.code(), holding.lots(),
+                holding.buyPrice(), name, market, quote.close(), quote.priceDate());
     }
 
     HoldingDetails get(long id) {
         return find(id).toDetails();
     }
 
-    @Transactional
     void create(String code, int lots, BigDecimal buyPrice) {
         String normalizedCode = code.strip();
+        if (repository.existsByCode(normalizedCode)) {
+            throw new DuplicateHoldingException(normalizedCode, null);
+        }
+        QuoteResult quote = quotes.lookup(normalizedCode, null);
+        if (quote.status() != QuoteResult.Status.FOUND) {
+            throw new StockLookupException(quote.status());
+        }
         try {
-            repository.saveAndFlush(new Holding(normalizedCode, lots, buyPrice));
+            repository.saveAndFlush(new Holding(normalizedCode, lots, buyPrice, quote.name(), quote.market()));
         } catch (DataIntegrityViolationException exception) {
             if (exception.getMostSpecificCause() instanceof SQLException sqlException
                     && "23505".equals(sqlException.getSQLState())) {

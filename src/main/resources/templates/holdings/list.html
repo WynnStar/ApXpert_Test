@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>持股清單｜持股記帳</title>
     <script defer th:src="@{/js/holding-validation.js}"></script>
+    <script defer th:src="@{/js/stock-lookup.js}"></script>
 </head>
 <body>
 <main>
@@ -15,13 +16,17 @@
     <p th:if="${#lists.isEmpty(holdings)}">目前沒有持股。</p>
     <table th:unless="${#lists.isEmpty(holdings)}">
         <thead>
-        <tr><th>股票代號</th><th>張數</th><th>買進價（每股）</th><th>操作</th></tr>
+        <tr><th>股票代號</th><th>股票名稱</th><th>市場</th><th>張數</th><th>買進價（每股）</th><th>收盤價</th><th>收盤日期</th><th>操作</th></tr>
         </thead>
         <tbody>
         <tr th:each="holding : ${holdings}">
             <td th:text="${holding.code}"></td>
+            <td th:text="${holding.name ?: '未取得'}"></td>
+            <td th:text="${holding.market == null ? '未取得' : holding.market.label}"></td>
             <td th:text="${holding.lots}"></td>
             <td th:text="${holding.buyPrice.toPlainString()}"></td>
+            <td th:text="${holding.close == null ? '未取得' : holding.close.toPlainString()}"></td>
+            <td th:text="${holding.priceDate ?: '未取得'}"></td>
             <td>
                 <a th:href="@{/holdings/{id}/edit(id=${holding.id})}">修改</a>
                 <form th:action="@{/holdings/{id}/delete(id=${holding.id})}" method="post">
@@ -34,11 +39,19 @@
 
     <h2>新增持股</h2>
     <form th:action="@{/holdings}" th:object="${form}" method="post">
+        <div th:if="${#fields.hasErrors('code')}" data-add-error-summary
+             role="alert" tabindex="-1">
+            <p><strong>新增持股失敗</strong></p>
+            <ul>
+                <li th:each="error : ${#fields.errors('code')}"><a href="#code" th:text="${error}"></a></li>
+            </ul>
+        </div>
         <p>
             <label for="code">股票代號</label>
-            <input type="text" th:field="*{code}" required minlength="4" maxlength="6" pattern="[0-9]{4}[0-9A-Z]{0,2}" placeholder="例如 0050" data-validation="code" data-feedback="code-feedback" aria-describedby="code-feedback code-feedback-server">
+            <input type="text" th:field="*{code}" required minlength="4" maxlength="6" pattern="[0-9]{4}[0-9A-Z]{0,2}" placeholder="例如 0050" th:data-stock-lookup-url="@{/holdings/stock-lookup}" data-validation="code" data-feedback="code-feedback" aria-describedby="code-feedback code-feedback-server">
             <span id="code-feedback-server" th:errors="*{code}" role="alert"></span>
             <span id="code-feedback" aria-live="polite" hidden></span>
+            <span id="stock-lookup-result" role="status"></span>
         </p>
         <p>
             <label for="terms.lots">張數（1 張 = 1,000 股）</label>

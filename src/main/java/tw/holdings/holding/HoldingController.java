@@ -26,23 +26,35 @@ class HoldingController {
 
     @GetMapping
     String list(Model model) {
-        model.addAttribute("form", CreateHoldingForm.empty());
+        if (!model.containsAttribute("form")) {
+            model.addAttribute("form", CreateHoldingForm.empty());
+        }
         return showList(model);
     }
 
     @PostMapping
     String create(@Valid @ModelAttribute("form") CreateHoldingForm form,
-                  BindingResult errors, Model model, RedirectAttributes redirect) {
+                  BindingResult errors, RedirectAttributes redirect) {
         if (errors.hasErrors()) {
-            return showList(model);
+            return redirectAfterCreateError(form, errors, redirect);
         }
         try {
             service.create(form.code(), form.lots(), form.buyPrice());
         } catch (DuplicateHoldingException exception) {
             errors.rejectValue("code", "duplicate", exception.getMessage());
-            return showList(model);
+            return redirectAfterCreateError(form, errors, redirect);
+        } catch (StockLookupException exception) {
+            errors.rejectValue("code", "stockLookup", exception.getMessage());
+            return redirectAfterCreateError(form, errors, redirect);
         }
         redirect.addFlashAttribute("notice", "已新增持股");
+        return "redirect:/holdings";
+    }
+
+    private String redirectAfterCreateError(CreateHoldingForm form, BindingResult errors,
+                                            RedirectAttributes redirect) {
+        redirect.addFlashAttribute("form", form);
+        redirect.addFlashAttribute(BindingResult.MODEL_KEY_PREFIX + "form", errors);
         return "redirect:/holdings";
     }
 
