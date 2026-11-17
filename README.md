@@ -16,16 +16,18 @@
 路徑最後不用加 `\bin`。即使 `java -version` 可執行，
 Windows 的 Maven Wrapper 仍需要這個變數。
 
-在同一個 PowerShell 視窗執行以下命令。若已設定正確，可跳過第一行。
+先用 Set-Location 進入含有 pom.xml 的專案根目錄。以下專案及 JDK 路徑均為範例，請依實際位置調整。若 JAVA_HOME 已正確設定，可跳過設定該變數的一行。
 
 ```powershell
+Set-Location -LiteralPath 'D:\ApXpert_Test\project'
 $env:JAVA_HOME = 'C:\Program Files\Java\jdk-17'
 echo $env:JAVA_HOME
 & "$env:JAVA_HOME\bin\java.exe" -version
 & "$env:JAVA_HOME\bin\javac.exe" -version
+.\mvnw.cmd -v
 ```
 
-確認 `java` 和 `javac` 都顯示 17 或以上版本後，在同一個視窗的專案根目錄啟動：
+確認 java、javac 和 Maven 顯示的 Java 版本都為 17 或以上後，在同一個視窗的專案根目錄啟動。
 
 ```powershell
 .\mvnw.cmd spring-boot:run
@@ -35,7 +37,21 @@ echo $env:JAVA_HOME
 若顯示 `JAVA_HOME not found` 或 `JAVA_HOME is set to an invalid directory`，
 請核對變數是否有值，且該目錄下有 `bin\java.exe` 和 `bin\javac.exe`。
 
-macOS／Linux
+### Windows Git Bash
+
+以下專案及 JDK 路徑請依實際位置調整。在 Git Bash 內設定的變數只影響目前視窗。
+
+~~~bash
+cd /d/ApXpert_Test/project
+export JAVA_HOME='/c/Program Files/Java/jdk-17'
+export PATH="$JAVA_HOME/bin:$PATH"
+"$JAVA_HOME/bin/java.exe" -version
+"$JAVA_HOME/bin/javac.exe" -version
+sh ./mvnw -v
+sh ./mvnw spring-boot:run
+~~~
+
+### macOS／Linux
 
 ```sh
 sh ./mvnw spring-boot:run

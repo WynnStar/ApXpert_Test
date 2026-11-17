@@ -23,13 +23,26 @@
 
 以下流程會新增記帳資料。可用以下指令啟動獨立記憶體測試庫，使用 8081 埠。停止這個測試服務後資料會消失。若 8081 已使用，請另選空閒埠號。
 
-Windows PowerShell，在專案根目錄且 JAVA_HOME 已依 README 設定後執行。
+Windows PowerShell，先進入專案根目錄，再設定目前視窗的 JAVA_HOME。以下路徑是範例，請按實際專案位置與已安裝的 JDK 根目錄調整。
+
+~~~powershell
+Set-Location -LiteralPath 'D:\ApXpert_Test\project'
+$env:JAVA_HOME = 'C:\Program Files\Java\jdk-17'
+echo $env:JAVA_HOME
+& "$env:JAVA_HOME\bin\java.exe" -version
+& "$env:JAVA_HOME\bin\javac.exe" -version
+.\mvnw.cmd -v
+~~~
+
+確認 java、javac 與 Maven 使用的 Java 都是 17 或以上版本，在同一個 PowerShell 視窗啟動測試服務。
 
 ~~~powershell
 .\mvnw.cmd spring-boot:run "-Dspring-boot.run.arguments=--server.port=8081 --spring.datasource.url=jdbc:h2:mem:api-guide"
 ~~~
 
-Git Bash、macOS 或 Linux，在專案根目錄執行。
+等待日誌顯示服務啟動，瀏覽 http://localhost:8081/ 確認首頁可開啟。停止服務時按 Ctrl+C。JAVA_HOME 設定只對目前視窗有效，新開視窗時需重新設定或使用已配置的系統環境變數。若顯示 JAVA_HOME not found 或 invalid directory，請核對 JDK 根目錄與 bin/java.exe 是否存在。
+
+Git Bash 使用者先依 README 的「Windows Git Bash」設定 JDK。Git Bash、macOS 或 Linux 在專案根目錄執行。
 
 ~~~bash
 sh ./mvnw spring-boot:run '-Dspring-boot.run.arguments=--server.port=8081 --spring.datasource.url=jdbc:h2:mem:api-guide'
@@ -41,15 +54,15 @@ sh ./mvnw spring-boot:run '-Dspring-boot.run.arguments=--server.port=8081 --spri
 
 ### 2.1 設定測試變數
 
-以下 curl 指令使用 Bash，可在 Git Bash、macOS 或 Linux 執行。先依 README 啟動伺服器，再開另一個終端機。
+以下 curl 指令使用 Bash，可在 Git Bash、macOS 或 Linux 執行。先依第 1 節啟動 8081 的測試服務，保持服務視窗開啟，再開另一個 Bash 終端機執行請求。
 
 ~~~bash
 BASE_URL='http://localhost:8081'
-TRADE_DATE=$(TZ=Asia/Taipei date +%F)
+TRADE_DATE=$(TZ=CST-8 date +%F)
 printf '%s\n' "$TRADE_DATE"
 ~~~
 
-確認日期和伺服器台北日期一致。Bash 的變數與換行語法須在 Git Bash 執行，PowerShell 使用者可改用 Postman 或第 3 節 fetch。
+此處的 CST-8 使用 POSIX 時區寫法，表示 UTC+8，與台北目前日期一致。部分 Windows Git Bash 無法解析 Asia/Taipei 時區資料，會退回 UTC，因此範例使用明確的時差。確認輸出的日期與台北日期一致後再送交易。Bash 的變數與換行語法須在 Git Bash 執行，PowerShell 使用者可改用 Postman 或第 3 節 fetch。
 
 ### 2.2 查詢清單
 
