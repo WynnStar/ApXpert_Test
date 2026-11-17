@@ -1,4 +1,4 @@
-package tw.holdings.quote;
+package tw.holdings.quote.client;
 
 import java.io.IOException;
 import java.time.LocalDate;
@@ -9,6 +9,8 @@ import java.util.regex.Pattern;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import tw.holdings.quote.Market;
+import tw.holdings.quote.QuoteResult;
 
 @Component
 class TwseQuoteClient implements QuoteSource {
@@ -44,6 +46,7 @@ class TwseQuoteClient implements QuoteSource {
             throw new IOException("Missing TWSE stock name");
         }
         var price = OfficialQuoteData.latest(body.path("fields"), body.path("data"), today);
-        return QuoteResult.found(title.group(1).strip(), market(), price);
+        return QuoteResult.found(title.group(1).strip(), market(),
+                price == null ? null : price.close(), price == null ? null : price.date());
     }
 }

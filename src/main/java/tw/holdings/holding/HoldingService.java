@@ -10,7 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import tw.holdings.profit.PortfolioSummary;
 import tw.holdings.profit.ProfitCalculator;
-import tw.holdings.quote.MarketStatusService;
+import tw.holdings.quote.marketstatus.MarketStatusService;
 import tw.holdings.quote.QuoteResult;
 import tw.holdings.quote.QuoteService;
 import tw.holdings.trade.TradeLedgerService;

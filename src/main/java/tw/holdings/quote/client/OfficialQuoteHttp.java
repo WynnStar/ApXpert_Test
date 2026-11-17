@@ -1,4 +1,4 @@
-package tw.holdings.quote;
+package tw.holdings.quote.client;
 
 import java.io.IOException;
 import java.net.URI;
@@ -11,6 +11,7 @@ import java.time.Duration;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
+import tw.holdings.quote.Market;
 
 @Component
 class OfficialQuoteHttp {

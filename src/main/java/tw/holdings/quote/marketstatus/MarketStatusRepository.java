@@ -1,4 +1,4 @@
-package tw.holdings.quote;
+package tw.holdings.quote.marketstatus;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -9,6 +9,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
+import tw.holdings.quote.Market;
 
 @Repository
 class MarketStatusRepository {

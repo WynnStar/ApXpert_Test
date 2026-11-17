@@ -8,7 +8,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
-import tw.holdings.quote.MarketStatusService;
+import tw.holdings.quote.marketstatus.MarketStatusService;
 import tw.holdings.quote.QuoteResult;
 import tw.holdings.quote.QuoteService;
 import tw.holdings.trade.InsufficientSharesException;

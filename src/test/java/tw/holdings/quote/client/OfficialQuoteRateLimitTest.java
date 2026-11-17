@@ -1,10 +1,11 @@
-package tw.holdings.quote;
+package tw.holdings.quote.client;
 
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 
 import org.junit.jupiter.api.Test;
+import tw.holdings.quote.Market;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;

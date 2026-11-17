@@ -1,4 +1,4 @@
-package tw.holdings.quote;
+package tw.holdings.quote.marketstatus;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -7,9 +7,11 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.stereotype.Service;
+import tw.holdings.quote.Market;
 
 @Service
 public class MarketStatusService {
+    public record ListingStatus(Market market, LocalDate effectiveDate, String name, boolean delisted) {}
     public record Delisting(Market market, String name, LocalDate effectiveDate,
                             BigDecimal lastClose, LocalDate lastPriceDate) {
         public String label() {
@@ -54,6 +56,12 @@ public class MarketStatusService {
                 .map(lastDay -> code + " 的最後交易日為 " + lastDay + "，無法登記之後的買進");
     }
 
+    public Optional<ListingStatus> quoteListing(String code, LocalDate date) {
+        return listingEvent(code, date)
+                .map(event -> new ListingStatus(event.market(), event.date(), event.name(),
+                        event.kind() == MarketEvent.Kind.DELISTED));
+    }
+
     Optional<MarketEvent> listingEvent(String code, LocalDate date) {
         return listingEvent(repository.events(code, date));
     }
@@ -64,6 +72,6 @@ public class MarketStatusService {
     }
 
     private LocalDate today() {
-        return LocalDate.ofInstant(clock.instant(), QuoteRefreshPolicy.TAIPEI);
+        return LocalDate.now(clock);
     }
 }

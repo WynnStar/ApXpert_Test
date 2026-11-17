@@ -1,4 +1,4 @@
-package tw.holdings.quote;
+package tw.holdings.quote.client;
 
 import java.io.IOException;
 import java.time.LocalDate;
@@ -7,15 +7,20 @@ import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.stereotype.Component;
+import tw.holdings.quote.Market;
 
 @Component
-class OfficialMarketClient {
+public class OfficialMarketClient {
     private static final String TWSE = "https://www.twse.com.tw/rwd/zh";
     private static final String TWSE_OPEN = "https://openapi.twse.com.tw/v1";
     private static final String TPEX = "https://www.tpex.org.tw/www/zh-tw";
     private static final String TPEX_OPEN = "https://www.tpex.org.tw/openapi/v1";
 
-    record Listing(String code, Market market, LocalDate date, String issuer, String name) {}
+    public record Listing(String code, Market market, LocalDate date, String issuer, String name) {}
+
+    public record Event(String code, Market market, LocalDate date, Kind kind, String name) {
+        public enum Kind { DELISTED, RELISTED, HALTED, RESUMED }
+    }
 
     private final OfficialQuoteHttp http;
 
@@ -23,23 +28,23 @@ class OfficialMarketClient {
         this.http = http;
     }
 
-    List<MarketEvent> delistings(Market market, int year) throws IOException, InterruptedException {
+    public List<Event> delistings(Market market, int year) throws IOException, InterruptedException {
         boolean twse = market == Market.TWSE;
         JsonNode body = http.fetch(market, twse ? TWSE + "/company/suspendListing?response=json"
                 : TPEX + "/company/deListed?code=&date=" + year + "&reason=-1&response=json");
         JsonNode table = twse ? body : body.path("tables").path(0);
         return events(market, array(table.path("data")), twse ? 2 : 0, 1, twse ? 0 : 2,
-                MarketEvent.Kind.DELISTED);
+                Event.Kind.DELISTED);
     }
 
-    List<MarketEvent> transfersToTwse(int year) throws IOException, InterruptedException {
+    public List<Event> transfersToTwse(int year) throws IOException, InterruptedException {
         var body = http.fetch(Market.TPEX,
                 TPEX + "/company/deListed?code=&date=" + year + "&reason=2&response=json");
         return events(Market.TWSE, array(body.path("tables").path(0).path("data")),
-                0, 1, 2, MarketEvent.Kind.RELISTED);
+                0, 1, 2, Event.Kind.RELISTED);
     }
 
-    List<Listing> listings(Market market) throws IOException, InterruptedException {
+    public List<Listing> listings(Market market) throws IOException, InterruptedException {
         boolean twse = market == Market.TWSE;
         var rows = array(http.fetchDocument(market, twse ? TWSE_OPEN + "/opendata/t187ap03_L"
                 : TPEX_OPEN + "/mopsfin_t187ap03_O"));
@@ -59,25 +64,25 @@ class OfficialMarketClient {
         return listings;
     }
 
-    List<MarketEvent> stops(Market market) throws IOException, InterruptedException {
+    public List<Event> stops(Market market) throws IOException, InterruptedException {
         if (market == Market.TWSE) {
             var table = http.fetch(market, TWSE + "/violation/stop?response=json").path("tables").path(0);
-            return events(market, array(table.path("data")), 0, 1, 4, MarketEvent.Kind.HALTED);
+            return events(market, array(table.path("data")), 0, 1, 4, Event.Kind.HALTED);
         }
         var rows = array(http.fetchDocument(market, TPEX_OPEN + "/mopsfin_t187ap26_O"));
-        var results = new ArrayList<MarketEvent>();
+        var results = new ArrayList<Event>();
         for (JsonNode row : rows) {
             add(results, market, row.path("SecuritiesCompanyCode").asText(), row.path("CompanyName").asText(),
-                    row.path("停止買賣開始日").asText(), MarketEvent.Kind.HALTED);
+                    row.path("停止買賣開始日").asText(), Event.Kind.HALTED);
         }
         return results;
     }
 
-    List<MarketEvent> halts(Market market) throws IOException, InterruptedException {
+    public List<Event> halts(Market market) throws IOException, InterruptedException {
         boolean twse = market == Market.TWSE;
         var rows = array(http.fetchDocument(market, twse ? TWSE_OPEN + "/exchangeReport/TWTAWU"
                 : TPEX_OPEN + "/tpex_spendi_history"));
-        var results = new ArrayList<MarketEvent>();
+        var results = new ArrayList<Event>();
         for (JsonNode row : rows) {
             String code = row.path(twse ? "Code" : "SecuritiesCompanyCode").asText();
             String name = row.path(twse ? "Name" : "CompanyName").asText();
@@ -89,16 +94,16 @@ class OfficialMarketClient {
                 if (time.matches("[0-9]{6}") && time.compareTo("090000") > 0) {
                     start = date(start).plusDays(1).toString();
                 }
-                add(results, market, code, name, start, MarketEvent.Kind.HALTED);
+                add(results, market, code, name, start, Event.Kind.HALTED);
             }
-            add(results, market, code, name, end, MarketEvent.Kind.RESUMED);
+            add(results, market, code, name, end, Event.Kind.RESUMED);
         }
         return results;
     }
 
-    private List<MarketEvent> events(Market market, JsonNode rows, int code, int name, int date,
-                                     MarketEvent.Kind kind) throws IOException {
-        var results = new ArrayList<MarketEvent>();
+    private List<Event> events(Market market, JsonNode rows, int code, int name, int date,
+                                     Event.Kind kind) throws IOException {
+        var results = new ArrayList<Event>();
         for (JsonNode row : rows) {
             if (!row.isArray() || row.size() <= Math.max(date, Math.max(code, name))) {
                 throw new IOException("Unexpected official event row");
@@ -108,10 +113,10 @@ class OfficialMarketClient {
         return results;
     }
 
-    private void add(List<MarketEvent> results, Market market, String code, String name, String effective,
-                     MarketEvent.Kind kind) {
+    private void add(List<Event> results, Market market, String code, String name, String effective,
+                     Event.Kind kind) {
         if (validCode(code.strip()) && !effective.isBlank()) {
-            results.add(new MarketEvent(code.strip(), market, date(effective), kind, name.strip()));
+            results.add(new Event(code.strip(), market, date(effective), kind, name.strip()));
         }
     }
 

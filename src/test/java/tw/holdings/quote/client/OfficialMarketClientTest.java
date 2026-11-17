@@ -1,10 +1,11 @@
-package tw.holdings.quote;
+package tw.holdings.quote.client;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tw.holdings.quote.Market;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.contains;
@@ -40,10 +41,10 @@ class OfficialMarketClientTest {
 
         assertEquals(LocalDate.of(2025, 7, 24), official.delistings(Market.TWSE, 2025).get(0).date());
         assertEquals(LocalDate.of(2025, 12, 4), official.delistings(Market.TPEX, 2025).get(0).date());
-        assertEquals(new MarketEvent("1597", Market.TWSE, LocalDate.of(2020, 12, 23),
-                MarketEvent.Kind.RELISTED, "直得"), official.transfersToTwse(2020).get(0));
+        assertEquals(new OfficialMarketClient.Event("1597", Market.TWSE, LocalDate.of(2020, 12, 23),
+                OfficialMarketClient.Event.Kind.RELISTED, "直得"), official.transfersToTwse(2020).get(0));
         assertEquals(LocalDate.of(2026, 11, 10), official.halts(Market.TWSE).get(0).date());
-        assertEquals(MarketEvent.Kind.RESUMED, official.halts(Market.TWSE).get(1).kind());
+        assertEquals(OfficialMarketClient.Event.Kind.RESUMED, official.halts(Market.TWSE).get(1).kind());
         assertEquals(LocalDate.of(2026, 6, 19), official.halts(Market.TPEX).get(0).date());
         assertEquals(LocalDate.of(2026, 6, 22), official.halts(Market.TPEX).get(1).date());
     }
