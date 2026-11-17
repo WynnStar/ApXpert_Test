@@ -34,7 +34,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(properties = "spring.datasource.url=jdbc:h2:mem:app-v1-api-test;DB_CLOSE_DELAY=-1")
+@SpringBootTest(properties = {"spring.datasource.url=jdbc:h2:mem:app-v1-api-test;DB_CLOSE_DELAY=-1",
+        "quotes.market-status-sync=false"})
 @AutoConfigureMockMvc
 class TradeVersionCompatibilityTest {
     private static final String V1 = "/api/v1/holdings";
@@ -55,6 +56,8 @@ class TradeVersionCompatibilityTest {
     void setup() {
         doAnswer(invocation -> quotes.lookup(invocation.getArgument(0), invocation.getArgument(1)))
                 .when(quotes).forDisplay(org.mockito.ArgumentMatchers.anyString(), nullable(Market.class));
+        jdbc.update("DELETE FROM market_final_close");
+        jdbc.update("DELETE FROM market_event");
         jdbc.update("DELETE FROM holding_trades");
         jdbc.update("DELETE FROM holdings");
         fixedQuote("0050", "元大台灣50", "170.00");
@@ -624,6 +627,83 @@ class TradeVersionCompatibilityTest {
                 .andExpect(content().string(not(containsString("我同意將這檔持股交由 2.0 管理"))));
         mvc.perform(post(edit).param("shares", "450").param("unitPrice", "141")).andExpect(redirectedUrl(detail));
         mvc.perform(get(V2 + "/" + id)).andExpect(jsonPath("$.shares").value(450));
+    }
+
+    @Test
+    void delistedHoldingsKeepV1FormatAndShowHistoricPriceOnlyInV2() throws Exception {
+        long legacy = createLegacy(OLD_BUY);
+        long converted = createLegacy(OLD_BUY.replace("0050", "2330"));
+        String convertedPath = V2 + "/" + converted;
+        mvc.perform(post(convertedPath + "/trades").contentType(MediaType.APPLICATION_JSON).content("""
+                {"side":"SELL","trade_date":"2026-11-15","shares":100,"unit_price":160,"confirm_v2":true}
+                """)).andExpect(status().isCreated());
+        recordMarketEvent("0050", "TWSE", "2026-11-16", "DELISTED", "元大台灣50");
+        recordMarketEvent("2330", "TWSE", "2026-11-16", "DELISTED", "台積電");
+        jdbc.update("""
+                INSERT INTO market_final_close VALUES
+                ('0050', 'TWSE', DATE '2026-11-16', DATE '2026-10-01', DATE '2026-11-12', 123.45)
+                """);
+
+        mvc.perform(get(V1 + "/" + legacy)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.market").value("TWSE"))
+                .andExpect(jsonPath("$.name").value("元大台灣50"))
+                .andExpect(jsonPath("$.current_price").value(nullValue()))
+                .andExpect(jsonPath("$.price_date").value(nullValue()))
+                .andExpect(jsonPath("$.pnl").value(nullValue()))
+                .andExpect(jsonPath("$.return_pct").value(nullValue()));
+        mvc.perform(get("/api/v1/summary")).andExpect(jsonPath("$.total_cost").value(300427))
+                .andExpect(jsonPath("$.market_value").value(0)).andExpect(jsonPath("$.quote_missing").value(1));
+        mvc.perform(get("/holdings")).andExpect(content().string(containsString("已下市")))
+                .andExpect(content().string(not(containsString("123.45"))));
+        mvc.perform(get("/v2/holdings")).andExpect(content().string(containsString("最後交易日收盤價 123.45")))
+                .andExpect(content().string(containsString("2026-11-12")))
+                .andExpect(content().string(containsString("已下市／下櫃、無法估值的持股成本")))
+                .andExpect(content().string(containsString(">無法估值<")));
+        mvc.perform(get(convertedPath)).andExpect(jsonPath("$.realized_pnl").value(908.65))
+                .andExpect(jsonPath("$.unrealized_pnl").value(nullValue()));
+        mvc.perform(post(V2 + "/" + legacy + "/trades").contentType(MediaType.APPLICATION_JSON).content("""
+                {"side":"BUY","trade_date":"2026-11-15","shares":100,"unit_price":100,"confirm_v2":true}
+                """)).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.message", containsString("最後交易日為 2026-11-12")));
+        mvc.perform(post(V1).contentType(MediaType.APPLICATION_JSON).content(OLD_BUY))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.error.code").value("STOCK_NOT_FOUND"))
+                .andExpect(jsonPath("$.error.message", containsString("已下市")));
+    }
+
+    @Test
+    void buyValidationUsesEffectiveDatesAcrossHaltsDelistingAndRelisting() throws Exception {
+        recordMarketEvent("2330", "TWSE", "2026-11-14", "HALTED", "台積電");
+        recordMarketEvent("2330", "TWSE", "2026-11-16", "DELISTED", "台積電");
+        String create = """
+                {"code":"2330","trade_date":"%s","shares":300,"unit_price":100}
+                """;
+        mvc.perform(post(V2).contentType(MediaType.APPLICATION_JSON).content(create.formatted("2026-11-16")))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error.message", containsString("下市")));
+        var result = mvc.perform(post(V2).contentType(MediaType.APPLICATION_JSON)
+                .content(create.formatted("2026-11-13"))).andExpect(status().isCreated()).andReturn();
+        long id = json.readTree(result.getResponse().getContentAsByteArray()).get("id").longValue();
+        String trades = V2 + "/" + id + "/trades";
+        String buy = """
+                {"side":"BUY","trade_date":"%s","shares":100,"unit_price":100}
+                """;
+        mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON).content(buy.formatted("2026-11-14")))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error.message", containsString("停止買賣")));
+        recordMarketEvent("2330", "TWSE", "2026-11-17", "RELISTED", "台積電");
+        mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON).content(buy.formatted("2026-11-17")))
+                .andExpect(status().isCreated());
+        mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON).content(buy.formatted("2026-11-16")))
+                .andExpect(status().isBadRequest());
+        long first = jdbc.queryForObject("SELECT MIN(id) FROM holding_trades WHERE holding_id = ?", Long.class, id);
+        mvc.perform(post("/v2/holdings/" + id + "/trades/" + first + "/edit")
+                        .param("tradeDate", "2026-11-16").param("shares", "300").param("unitPrice", "100"))
+                .andExpect(content().string(containsString("無法登記該日或之後的買進")));
+        mvc.perform(get(trades)).andExpect(jsonPath("$[0].trade_date").value("2026-11-13"));
+    }
+
+    private void recordMarketEvent(String code, String market, String date, String kind, String name) {
+        jdbc.update("""
+                INSERT INTO market_event (code, market, effective_date, kind, stock_name) VALUES (?, ?, ?, ?, ?)
+                """, code, market, LocalDate.parse(date), kind, name);
     }
 
     private String tradeDeletePage(long holdingId, String side) {

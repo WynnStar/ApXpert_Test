@@ -20,6 +20,7 @@ import org.springframework.boot.test.autoconfigure.jdbc.JdbcTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -43,9 +44,36 @@ class QuoteRefreshTest {
     void setup() {
         clock.set(TUESDAY, 10, 0);
         cache = new QuoteCacheRepository(jdbc);
-        quotes = new QuoteService(cache, List.of(source), clock, workers);
+        quotes = new QuoteService(cache, List.of(source), clock, workers, new MarketStatusService(new MarketStatusRepository(jdbc), clock));
         doAnswer(task -> { task.<Runnable>getArgument(0).run(); return null; })
                 .when(workers).execute(any(Runnable.class));
+    }
+
+    @Test
+    void confirmedDelistingSuppressesAllNormalRequestsAndRelistingIgnoresOldPrices() {
+        cache.save(TUESDAY, CODE, new QuoteCacheRepository.Entry(YESTERDAY, 0, 0, clock.instant()), clock.instant());
+        var markets = new MarketStatusRepository(jdbc);
+        markets.save(new MarketEvent(CODE, Market.TWSE, TUESDAY, MarketEvent.Kind.DELISTED, "台積電"));
+        clock.set(TUESDAY, 14, 0);
+        assertEquals(QuoteResult.Status.NOT_FOUND, quotes.forDisplay(CODE, Market.TWSE).status());
+        assertEquals(QuoteResult.Status.NOT_FOUND, quotes.lookup(CODE, Market.TWSE).status());
+        quotes.refreshPendingCloses();
+        assertEquals(0, source.calls);
+
+        var wednesday = TUESDAY.plusDays(1);
+        clock.set(wednesday, 14, 0);
+        markets.save(new MarketEvent(CODE, Market.TWSE, wednesday, MarketEvent.Kind.RELISTED, "台積電"));
+        source.result = YESTERDAY;
+        var fromNewMarket = quotes.forDisplay(CODE, Market.TPEX);
+        assertEquals(Market.TWSE, fromNewMarket.market());
+        assertNull(fromNewMarket.close());
+        assertNull(quotes.lookup(CODE, Market.TPEX).close());
+        assertEquals(1, source.calls);
+        clock.advance(301);
+        source.result = found(wednesday, "112.00");
+        quotes.refreshPendingCloses();
+        assertEquals(new BigDecimal("112.00"), quotes.forDisplay(CODE, Market.TWSE).close());
+        assertEquals(2, source.calls);
     }
 
     @Test
@@ -109,7 +137,7 @@ class QuoteRefreshTest {
         assertEquals(4, source.calls);
 
         // 模擬應用程式換新實例，重試次數與最後行情仍從資料庫取得。
-        var restarted = new QuoteService(cache, List.of(source), clock, workers);
+        var restarted = new QuoteService(cache, List.of(source), clock, workers, new MarketStatusService(new MarketStatusRepository(jdbc), clock));
         restarted.refreshPendingCloses();
         assertEquals(YESTERDAY, restarted.forDisplay(CODE, Market.TWSE));
         assertEquals(4, source.calls);

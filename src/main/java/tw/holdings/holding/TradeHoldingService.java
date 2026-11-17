@@ -10,6 +10,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import tw.holdings.quote.MarketStatusService;
 import tw.holdings.quote.QuoteResult;
 import tw.holdings.quote.QuoteService;
 import tw.holdings.trade.InsufficientSharesException;
@@ -24,14 +25,16 @@ class TradeHoldingService {
     private final HoldingRepository holdings;
     private final TradeLedgerService ledger;
     private final QuoteService quotes;
+    private final MarketStatusService markets;
     private final TransactionTemplate transactions;
     private final Clock clock;
 
     TradeHoldingService(HoldingRepository holdings, TradeLedgerService ledger,
-                        QuoteService quotes, TransactionTemplate transactions, Clock clock) {
+                        QuoteService quotes, TransactionTemplate transactions, Clock clock, MarketStatusService markets) {
         this.holdings = holdings;
         this.ledger = ledger;
         this.quotes = quotes;
+        this.markets = markets;
         this.transactions = transactions;
         this.clock = clock;
     }
@@ -50,16 +53,21 @@ class TradeHoldingService {
 
     long create(String code, Trade firstBuy) {
         validateTradeDate(firstBuy, today());
+        validateBuy(code, firstBuy);
         if (holdings.existsByCode(code)) {
             throw new DuplicateHoldingException(code, null);
         }
-        QuoteResult identity = quotes.lookup(code, null);
+        QuoteResult identity = markets.delisting(code)
+                .map(delisting -> new QuoteResult(QuoteResult.Status.FOUND,
+                        delisting.name(), delisting.market(), null, null))
+                .orElseGet(() -> quotes.lookup(code, null));
         if (identity.status() != QuoteResult.Status.FOUND) {
             throw new StockLookupException(identity.status());
         }
 
         try {
             return transactions.execute(status -> {
+                validateBuy(code, firstBuy);
                 Holding holding = holdings.saveAndFlush(Holding.managed(code, identity.name(), identity.market()));
                 ledger.recordTrade(holding.id(), firstBuy);
                 return holding.id();
@@ -78,6 +86,7 @@ class TradeHoldingService {
         LocalDate currentDate = today();
         validateTradeDate(trade, currentDate);
         Holding holding = holdings.lockById(id).orElseThrow(() -> new HoldingNotFoundException(id));
+        validateBuy(holding.code(), trade);
         if (!holding.isV2Managed()) {
             if (!confirmV2) {
                 throw HoldingVersionConflict.confirmationRequired();
@@ -126,6 +135,7 @@ class TradeHoldingService {
         Trade edited = form.applyTo(original.trade().side());
         if (edited.side() != Trade.Side.OPENING) {
             validateTradeDate(edited, today());
+            validateBuy(holding.code(), edited);
         }
         if (!holding.isV2Managed()) {
             if (!Boolean.TRUE.equals(form.confirmV2())) {
@@ -182,6 +192,14 @@ class TradeHoldingService {
         }
     }
 
+    private void validateBuy(String code, Trade trade) {
+        if (trade.side() == Trade.Side.BUY) {
+            markets.buyRestriction(code, trade.tradeDate()).ifPresent(message -> {
+                throw new HoldingApiController.ApiValidationException(message);
+            });
+        }
+    }
+
     private void validateTradeDate(Trade trade, LocalDate currentDate) {
         if (trade.tradeDate().isAfter(currentDate)) {
             throw new HoldingApiController.ApiValidationException("交易日期不能晚於今天");
@@ -191,13 +209,19 @@ class TradeHoldingService {
     private TradeHoldingView.History history(Holding holding) {
         var entries = ledger.entries(holding.id());
         var position = TradeLedger.replay(holding.code(), entries.stream().map(TradeEntry::trade).toList());
-        QuoteResult quote = quotes.forDisplay(holding.code(), holding.market());
+        var delisting = markets.delisting(holding.code()).orElse(null);
+        QuoteResult quote = delisting == null ? quotes.forDisplay(holding.code(), holding.market()) : null;
         boolean found = quote != null && quote.status() == QuoteResult.Status.FOUND;
         var close = found ? quote.close() : null;
-        var view = new TradeHoldingView(holding.id(), holding.code(),
-                found ? quote.name() : holding.name(), found ? quote.market() : holding.market(), holding.isV2Managed(),
+        String name = found ? quote.name() : holding.name();
+        var market = found ? quote.market() : holding.market();
+        if (delisting != null) {
+            name = name == null ? delisting.name() : name;
+            market = market == null ? delisting.market() : market;
+        }
+        var view = new TradeHoldingView(holding.id(), holding.code(), name, market, holding.isV2Managed(),
                 position.shares(), position.remainingCost(), position.averageCost(), position.realizedPnl(),
-                position.unrealizedPnl(holding.code(), close), close, found ? quote.priceDate() : null);
+                position.unrealizedPnl(holding.code(), close), close, found ? quote.priceDate() : null, delisting);
         return new TradeHoldingView.History(view, TradeHoldingView.TradeDetail.from(entries));
     }
 }
