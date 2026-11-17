@@ -287,6 +287,35 @@ class TradeVersionCompatibilityTest {
     }
 
     @Test
+    void addingATradeThatOverflowsSharesReturnsValidationAndKeepsTheOriginalPosition() throws Exception {
+        LocalDate today = LocalDate.now(java.time.ZoneId.of("Asia/Taipei"));
+        var created = mvc.perform(post(V2).contentType(MediaType.APPLICATION_JSON).content("""
+                {"code":"2330","trade_date":"%s","shares":%d,"unit_price":1}
+                """.formatted(today, Long.MAX_VALUE))).andExpect(status().isCreated()).andReturn();
+        long id = json.readTree(created.getResponse().getContentAsByteArray()).get("id").longValue();
+        String trades = V2 + "/" + id + "/trades";
+        String detail = "/v2/holdings/" + id;
+        String append = """
+                {"side":"BUY","trade_date":"%s","shares":1,"unit_price":1}
+                """.formatted(today);
+        String message = "新增後的累計股數超過可儲存的範圍";
+        mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON).content(append))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.error.message").value(message));
+        mvc.perform(post(detail + "/trades").param("side", "BUY").param("tradeDate", today.toString())
+                        .param("shares", "1").param("unitPrice", "1"))
+                .andExpect(status().isOk()).andExpect(content().string(containsString(message)));
+        var history = mvc.perform(get(trades)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1)).andReturn();
+        org.junit.jupiter.api.Assertions.assertEquals(Long.MAX_VALUE, json.readTree(
+                history.getResponse().getContentAsByteArray()).get(0).get("shares").longValue());
+
+        mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON).content(append.replace("BUY", "SELL")))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
     void futureDatesAreRejectedAndSameDayBuyBeforeSellWorks() throws Exception {
         LocalDate today = LocalDate.now(java.time.ZoneId.of("Asia/Taipei"));
         String future = today.plusDays(1).toString();

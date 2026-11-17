@@ -95,6 +95,8 @@ class TradeHoldingService {
                 throw exception.withHistoricalBuyHint();
             }
             throw exception;
+        } catch (ArithmeticException exception) {
+            throw new HoldingApiController.ApiValidationException("新增後的累計股數超過可儲存的範圍");
         }
     }
 
