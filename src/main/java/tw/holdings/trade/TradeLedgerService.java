@@ -64,6 +64,11 @@ public class TradeLedgerService {
         repository.removeOpening(holdingId);
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void removeTrades(long holdingId) {
+        repository.deleteByHolding(holdingId);
+    }
+
     @Transactional
     public TradePosition recordTrade(long holdingId, Trade trade) {
         String code = repository.lockHoldingCode(holdingId)

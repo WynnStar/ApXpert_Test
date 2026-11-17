@@ -94,6 +94,21 @@ class TradeHoldingService {
         }
     }
 
+    DeleteTarget deleteTarget(long id) {
+        Holding holding = holdings.findById(id).orElseThrow(() -> new HoldingNotFoundException(id));
+        return new DeleteTarget(holding.id(), holding.code(), holding.name());
+    }
+
+    record DeleteTarget(long id, String code, String name) {
+    }
+
+    @Transactional
+    public void delete(long id) {
+        Holding holding = holdings.lockById(id).orElseThrow(() -> new HoldingNotFoundException(id));
+        ledger.removeTrades(id);
+        holdings.delete(holding);
+    }
+
     void move(long id, long tradeId, TradeLedgerService.Direction direction) {
         try {
             ledger.move(id, tradeId, direction);

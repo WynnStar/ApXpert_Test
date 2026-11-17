@@ -339,6 +339,69 @@ class TradeVersionCompatibilityTest {
                 .andExpect(jsonPath("$[4].unit_price").value(40));
     }
 
+    @Test
+    void v2ListCanDeleteAnUnconvertedLegacyHoldingAfterConfirmation() throws Exception {
+        long id = createLegacy(OLD_BUY);
+        String list = "/v2/holdings";
+        String deletePage = list + "/" + id + "/delete";
+        mvc.perform(get(list)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("href=\"" + deletePage + "\">刪除")));
+        mvc.perform(get(deletePage)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("確認刪除 0050 元大台灣50")))
+                .andExpect(content().string(containsString("所有買賣紀錄和已實現損益紀錄")))
+                .andExpect(content().string(containsString("href=\"" + list + "\">取消")))
+                .andExpect(content().string(containsString("action=\"" + deletePage + "\"")));
+
+        // 取消連結只返回清單，確認頁與取消都不會刪除資料。
+        mvc.perform(get(list)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("<td>0050</td>")));
+        mvc.perform(get(V1 + "/" + id)).andExpect(status().isOk());
+        mvc.perform(get(V2 + "/" + id + "/trades"))
+                .andExpect(jsonPath("$[0].side").value("OPENING"));
+
+        var deleted = mvc.perform(post(deletePage)).andExpect(status().is3xxRedirection())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl(list))
+                .andReturn();
+        mvc.perform(get(list).flashAttrs(deleted.getFlashMap())).andExpect(status().isOk())
+                .andExpect(content().string(containsString("已刪除整檔持股及交易紀錄")))
+                .andExpect(content().string(containsString("目前沒有持股。")));
+        mvc.perform(get(V1 + "/" + id)).andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/summary")).andExpect(jsonPath("$.total_cost").value(0));
+        mvc.perform(get(V2 + "/" + id + "/trades")).andExpect(status().isNotFound());
+        mvc.perform(get(deletePage)).andExpect(status().isNotFound());
+        mvc.perform(post(deletePage)).andExpect(status().isNotFound());
+        org.junit.jupiter.api.Assertions.assertEquals(0L, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM holding_trades WHERE holding_id = ?", Long.class, id));
+    }
+
+    @Test
+    void v2ListDeletesClosedHoldingAndItsProfitWithoutChangingOtherHoldings() throws Exception {
+        long id = createLegacy(OLD_BUY);
+        long other = createLegacy(OLD_BUY.replace("0050", "2330"));
+        mvc.perform(post(V2 + "/" + id + "/trades").contentType(MediaType.APPLICATION_JSON).content("""
+                {"side":"SELL","trade_date":"2026-11-17","shares":2000,
+                 "unit_price":160,"confirm_v2":true}
+                """)).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.shares").value(0))
+                .andExpect(jsonPath("$.realized_pnl").value(18797));
+        mvc.perform(delete(V1 + "/" + id)).andExpect(status().isConflict());
+        String list = "/v2/holdings";
+        String deletePage = list + "/" + id + "/delete";
+        mvc.perform(get(list)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("18,797.00 元")))
+                .andExpect(content().string(containsString("href=\"" + deletePage + "\">刪除")));
+        mvc.perform(post(deletePage)).andExpect(status().is3xxRedirection());
+        mvc.perform(get(list)).andExpect(status().isOk())
+                .andExpect(content().string(not(containsString("18,797.00 元"))))
+                .andExpect(content().string(not(containsString("<td>0050</td>"))))
+                .andExpect(content().string(containsString("<td>2330</td>")));
+        mvc.perform(get(V1)).andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(other));
+        mvc.perform(get(V2 + "/" + other + "/trades")).andExpect(jsonPath("$.length()").value(1));
+        org.junit.jupiter.api.Assertions.assertEquals(0L, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM holding_trades WHERE holding_id = ?", Long.class, id));
+    }
+
     private long createLegacy(String body) throws Exception {
         var result = mvc.perform(post(V1).contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated()).andReturn();

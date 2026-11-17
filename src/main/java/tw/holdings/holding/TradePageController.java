@@ -74,6 +74,19 @@ class TradePageController {
         }
     }
 
+    @GetMapping("/{id}/delete")
+    String confirmDelete(@PathVariable long id, Model model) {
+        model.addAttribute("holding", service.deleteTarget(id));
+        return "trades/delete";
+    }
+
+    @PostMapping("/{id}/delete")
+    String delete(@PathVariable long id, RedirectAttributes redirect) {
+        service.delete(id);
+        redirect.addFlashAttribute("notice", "已刪除整檔持股及交易紀錄");
+        return "redirect:/v2/holdings";
+    }
+
     @PostMapping("/{id}/trades/{tradeId}/move")
     String move(@PathVariable long id, @PathVariable long tradeId, @RequestParam Direction direction,
                 RedirectAttributes redirect) {

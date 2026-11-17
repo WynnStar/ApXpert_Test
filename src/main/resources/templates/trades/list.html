@@ -10,6 +10,7 @@
 <main>
     <nav><a th:href="@{/}">回首頁</a> · <a th:href="@{/holdings}">App 1.0 相容清單</a></nav>
     <h1>持股記帳 2.0</h1>
+    <p th:if="${notice}" th:text="${notice}" role="status"></p>
     <section aria-labelledby="summary-heading">
         <h2 id="summary-heading">持股總計</h2>
         <dl>
@@ -48,7 +49,10 @@
             <td><span th:replace="~{trades/profit :: money(${holding.unrealizedPnl})}"></span></td>
             <td><span th:replace="~{trades/profit :: rate(${holding.unrealizedReturnPct()})}"></span></td>
             <td><span th:replace="~{trades/profit :: money(${holding.realizedPnl})}"></span></td>
-            <td><a th:href="@{/v2/holdings/{id}(id=${holding.id})}">交易紀錄</a></td>
+            <td>
+                <a th:href="@{/v2/holdings/{id}(id=${holding.id})}">交易紀錄</a>
+                <a th:href="@{/v2/holdings/{id}/delete(id=${holding.id})}">刪除</a>
+            </td>
         </tr>
         </tbody>
     </table>
