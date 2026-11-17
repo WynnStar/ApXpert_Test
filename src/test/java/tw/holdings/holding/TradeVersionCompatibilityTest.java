@@ -138,6 +138,23 @@ class TradeVersionCompatibilityTest {
     }
 
     @Test
+    void v2CreateFormSharesStockLookupAndRetainsDateHint() throws Exception {
+        when(quotes.lookup("6488", null)).thenReturn(
+                new QuoteResult(QuoteResult.Status.FOUND, "環球晶", Market.TPEX, null, null));
+        mvc.perform(get("/v2/holdings")).andExpect(status().isOk())
+                .andExpect(content().string(containsString("data-stock-lookup-url=\"/holdings/stock-lookup\"")))
+                .andExpect(content().string(containsString("id=\"stock-lookup-result\"")))
+                .andExpect(content().string(containsString("src=\"/js/stock-lookup.js\"")))
+                .andExpect(content().string(containsString("data-trade-date-url=\"/v2/holdings/trade-date-range\"")))
+                .andExpect(content().string(containsString("src=\"/js/trade-date-range.js\"")));
+
+        mvc.perform(get("/holdings/stock-lookup").param("code", "2330"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.message").value("台積電（上市）"));
+        mvc.perform(get("/holdings/stock-lookup").param("code", "6488"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.message").value("環球晶（上櫃）"));
+    }
+
+    @Test
     void newWebHoldingSupportsSharesAndOnlyAppearsInV2() throws Exception {
         mvc.perform(get("/v2/holdings")).andExpect(status().isOk())
                 .andExpect(content().string(containsString("目前沒有持股。")));
