@@ -1,4 +1,4 @@
-package tw.holdings.quote;
+package tw.holdings.quote.marketstatus;
 
 import java.io.IOException;
 import java.time.LocalDate;
@@ -10,6 +10,8 @@ import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import tw.holdings.quote.Market;
+import tw.holdings.quote.client.OfficialMarketClient;
 
 @Service
 class MarketStatusSyncService {
@@ -63,7 +65,8 @@ class MarketStatusSyncService {
             boolean recent = year >= day.getYear() - 1;
             if (!transferYears.contains(year) || (recent && daily)) {
                 boolean transfersLoaded = importRows("TPEx transfers to TWSE " + year,
-                        () -> official.transfersToTwse(reportYear), repository::saveTpexTransfer);
+                        () -> official.transfersToTwse(reportYear),
+                        event -> repository.saveTpexTransfer(MarketEvent.fromOfficial(event)));
                 if (!transfersLoaded) {
                     continue;
                 }
@@ -75,7 +78,7 @@ class MarketStatusSyncService {
             var codes = new HashSet<String>();
             boolean success = importRows("TPEx delistings " + year,
                     () -> official.delistings(Market.TPEX, reportYear),
-                    event -> recordTpexDelisting(event, held, codes));
+                    event -> recordTpexDelisting(MarketEvent.fromOfficial(event), held, codes));
             if (success && !recent) {
                 for (String code : codes.stream().sorted().toList()) {
                     if (backfilled.add(code)) {
@@ -106,11 +109,15 @@ class MarketStatusSyncService {
     }
 
     private void loadEvents(int year) throws InterruptedException {
-        importRows("TWSE delistings", () -> official.delistings(Market.TWSE, year), repository::save);
+        importRows("TWSE delistings", () -> official.delistings(Market.TWSE, year), this::saveOfficialEvent);
         for (Market market : Market.values()) {
-            importRows("halts " + market, () -> official.halts(market), repository::save);
-            importRows("stops " + market, () -> official.stops(market), repository::save);
+            importRows("halts " + market, () -> official.halts(market), this::saveOfficialEvent);
+            importRows("stops " + market, () -> official.stops(market), this::saveOfficialEvent);
         }
+    }
+
+    private void saveOfficialEvent(OfficialMarketClient.Event event) {
+        repository.save(MarketEvent.fromOfficial(event));
     }
 
     private void reconcileListing(OfficialMarketClient.Listing listing, LocalDate day) {

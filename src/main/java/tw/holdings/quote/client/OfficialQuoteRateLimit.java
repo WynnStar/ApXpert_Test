@@ -1,4 +1,4 @@
-package tw.holdings.quote;
+package tw.holdings.quote.client;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -12,6 +12,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import tw.holdings.quote.Market;
 
 @Component
 class OfficialQuoteRateLimit {

@@ -1,4 +1,4 @@
-package tw.holdings.quote;
+package tw.holdings.quote.client;
 
 import java.io.IOException;
 import java.time.LocalDate;
@@ -9,6 +9,8 @@ import java.util.Locale;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import tw.holdings.quote.Market;
+import tw.holdings.quote.QuoteResult;
 
 @Component
 class TpexQuoteClient implements QuoteSource {
@@ -49,6 +51,7 @@ class TpexQuoteClient implements QuoteSource {
             throw new IOException("Missing or mismatched TPEx stock identity");
         }
         var price = OfficialQuoteData.latest(table.path("fields"), rows, today);
-        return QuoteResult.found(name, market(), price);
+        return QuoteResult.found(name, market(),
+                price == null ? null : price.close(), price == null ? null : price.date());
     }
 }

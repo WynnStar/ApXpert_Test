@@ -1,15 +1,9 @@
 package tw.holdings.quote;
 
-import java.io.IOException;
 import java.time.Clock;
 import java.time.LocalDate;
-import java.time.YearMonth;
 import java.time.ZonedDateTime;
-import java.util.Comparator;
-import java.util.EnumSet;
-import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -22,21 +16,23 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import tw.holdings.quote.marketstatus.MarketStatusService;
+import tw.holdings.quote.marketstatus.MarketStatusService.ListingStatus;
 
 @Service
 public class QuoteService {
     private static final Logger LOGGER = LoggerFactory.getLogger(QuoteService.class);
     private final QuoteCacheRepository cache;
-    private final List<QuoteSource> sources;
+    private final OfficialQuoteLookup officialQuotes;
     private final Clock clock;
     private final MarketStatusService markets;
     private final ExecutorService quoteWorkers;
     private final ConcurrentHashMap<String, CompletableFuture<QuoteResult>> inFlight = new ConcurrentHashMap<>();
 
-    QuoteService(QuoteCacheRepository cache, List<QuoteSource> sources, Clock clock,
+    QuoteService(QuoteCacheRepository cache, OfficialQuoteLookup officialQuotes, Clock clock,
                  ExecutorService quoteWorkers, MarketStatusService markets) {
         this.cache = cache;
-        this.sources = sources.stream().sorted(Comparator.comparing(QuoteSource::market)).toList();
+        this.officialQuotes = officialQuotes;
         this.clock = clock;
         this.markets = markets;
         this.quoteWorkers = quoteWorkers;
@@ -45,7 +41,7 @@ public class QuoteService {
     public QuoteResult lookup(String code, Market knownMarket) {
         ZonedDateTime now = taipeiNow();
         var day = now.toLocalDate();
-        var listing = markets.listingEvent(code, day).orElse(null);
+        var listing = markets.quoteListing(code, day).orElse(null);
         if (isDelisted(listing)) {
             return QuoteResult.notFound();
         }
@@ -79,7 +75,7 @@ public class QuoteService {
     public QuoteResult forDisplay(String code, Market knownMarket) {
         ZonedDateTime now = taipeiNow();
         var day = now.toLocalDate();
-        var listing = markets.listingEvent(code, day).orElse(null);
+        var listing = markets.quoteListing(code, day).orElse(null);
         if (isDelisted(listing)) {
             return QuoteResult.notFound();
         }
@@ -93,7 +89,7 @@ public class QuoteService {
             return last;
         }
         return listing == null ? QuoteResult.unavailable()
-                : QuoteResult.found(listing.name(), listing.market(), null);
+                : QuoteResult.found(listing.name(), listing.market(), null, null);
     }
 
     @Scheduled(fixedDelay = 30_000)
@@ -101,7 +97,7 @@ public class QuoteService {
         ZonedDateTime now = taipeiNow();
         if (QuoteRefreshPolicy.isPostClose(now)) {
             cache.dueAfterClose(now.toLocalDate(), now.toInstant())
-                    .stream().filter(due -> !isDelisted(markets.listingEvent(due.code(), now.toLocalDate()).orElse(null)))
+                    .stream().filter(due -> !isDelisted(markets.quoteListing(due.code(), now.toLocalDate()).orElse(null)))
                     .forEach(due -> submit(due.code(), due.market(), false));
         }
     }
@@ -140,7 +136,7 @@ public class QuoteService {
     private QuoteResult refresh(String code, Market hint, boolean validation) {
         ZonedDateTime now = taipeiNow();
         var day = now.toLocalDate();
-        var listing = markets.listingEvent(code, day).orElse(null);
+        var listing = markets.quoteListing(code, day).orElse(null);
         if (isDelisted(listing)) {
             return QuoteResult.notFound();
         }
@@ -157,9 +153,9 @@ public class QuoteService {
                 : hint != null ? hint : last == null ? null : last.market();
         boolean postClose = QuoteRefreshPolicy.isPostClose(now);
         boolean onlyCurrentMonth = postClose && last != null && last.close() != null;
-        QuoteResult result = lookupOfficial(code, market, day, onlyCurrentMonth);
-        if (listing != null && result.priceDate() != null && result.priceDate().isBefore(listing.date())) {
-            result = QuoteResult.found(listing.name(), market, null);
+        QuoteResult result = officialQuotes.lookup(code, market, day, onlyCurrentMonth);
+        if (listing != null && result.priceDate() != null && result.priceDate().isBefore(listing.effectiveDate())) {
+            result = QuoteResult.found(listing.name(), market, null, null);
         }
         if (result.status() == QuoteResult.Status.NOT_FOUND && market != null) {
             result = QuoteResult.unavailable();
@@ -174,7 +170,7 @@ public class QuoteService {
         return failed ? result : retained;
     }
 
-    private QuoteCacheRepository.Entry dailyEntry(LocalDate day, String code, MarketEvent listing) {
+    private QuoteCacheRepository.Entry dailyEntry(LocalDate day, String code, ListingStatus listing) {
         var entry = cache.find(day, code).orElse(null);
         if (entry == null || listing == null) {
             return entry;
@@ -182,19 +178,19 @@ public class QuoteService {
         var result = entry.result();
         if (result.status() == QuoteResult.Status.FOUND
                 && (result.market() != listing.market()
-                || result.priceDate() != null && result.priceDate().isBefore(listing.date()))) {
+                || result.priceDate() != null && result.priceDate().isBefore(listing.effectiveDate()))) {
             return null;
         }
         return entry;
     }
 
-    private Optional<QuoteResult> latestFound(LocalDate day, String code, MarketEvent listing) {
+    private Optional<QuoteResult> latestFound(LocalDate day, String code, ListingStatus listing) {
         return listing == null ? cache.latestFound(day, code)
-                : cache.latestFound(day, code, listing.date(), listing.market());
+                : cache.latestFound(day, code, listing.effectiveDate(), listing.market());
     }
 
-    private boolean isDelisted(MarketEvent listing) {
-        return listing != null && listing.kind() == MarketEvent.Kind.DELISTED;
+    private boolean isDelisted(ListingStatus listing) {
+        return listing != null && listing.delisted();
     }
 
     private QuoteResult keepLatest(QuoteResult received, QuoteResult existing) {
@@ -211,49 +207,5 @@ public class QuoteService {
 
     private ZonedDateTime taipeiNow() {
         return clock.instant().atZone(QuoteRefreshPolicy.TAIPEI);
-    }
-
-    private QuoteResult lookupOfficial(String code, Market knownMarket, LocalDate day, boolean onlyCurrentMonth) {
-        Set<Market> unavailable = EnumSet.noneOf(Market.class);
-        QuoteResult identity = null;
-        YearMonth current = YearMonth.from(day);
-        for (YearMonth month : (onlyCurrentMonth ? List.of(current) : List.of(current, current.minusMonths(1)))) {
-            for (QuoteSource source : sources) {
-                Market preferred = identity == null ? knownMarket : identity.market();
-                if (unavailable.contains(source.market()) || (preferred != null && preferred != source.market())) {
-                    continue;
-                }
-                QuoteResult result = fetch(source, code, month, day);
-                switch (result.status()) {
-                    case FOUND -> {
-                        if (result.close() != null) {
-                            return result;
-                        }
-                        identity = result;
-                    }
-                    case UNAVAILABLE -> unavailable.add(source.market());
-                    case NOT_FOUND -> {
-                        // 查無當月資料時可能是月初休市，仍須檢查上個月。
-                    }
-                }
-            }
-        }
-        if (identity != null) {
-            return identity;
-        }
-        return unavailable.isEmpty() ? QuoteResult.notFound() : QuoteResult.unavailable();
-    }
-
-    private QuoteResult fetch(QuoteSource source, String code, YearMonth month, LocalDate day) {
-        try {
-            return source.fetch(code, month, day);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            return QuoteResult.unavailable();
-        } catch (IOException | RuntimeException exception) {
-            LOGGER.warn("Official quote unavailable: market={}, code={}, month={}, reason={}",
-                    source.market(), code, month, exception.getClass().getSimpleName());
-            return QuoteResult.unavailable();
-        }
     }
 }

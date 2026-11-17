@@ -5,7 +5,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 
 import org.springframework.stereotype.Service;
-import tw.holdings.quote.MarketStatusService;
+import tw.holdings.quote.marketstatus.MarketStatusService;
 
 @Service
 class TradeDateRules {

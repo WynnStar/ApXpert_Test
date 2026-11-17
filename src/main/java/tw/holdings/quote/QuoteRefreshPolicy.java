@@ -6,6 +6,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 
+
 final class QuoteRefreshPolicy {
     static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
     static final int MAX_POST_CLOSE_ATTEMPTS = 4;

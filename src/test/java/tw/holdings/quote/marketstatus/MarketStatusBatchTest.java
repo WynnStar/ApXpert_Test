@@ -1,10 +1,11 @@
-package tw.holdings.quote;
+package tw.holdings.quote.marketstatus;
 
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -13,6 +14,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.JdbcTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import tw.holdings.quote.Market;
+import tw.holdings.quote.QuoteResult;
+import tw.holdings.quote.client.OfficialMarketClient;
+import tw.holdings.quote.client.QuoteSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -37,7 +42,7 @@ class MarketStatusBatchTest {
         var history = mock(DelistedQuoteHistory.class);
         var day = LocalDate.of(2026, 11, 17);
         var delisting = new MarketEvent("2888", Market.TWSE, day, MarketEvent.Kind.DELISTED, "新光金");
-        when(official.delistings(eq(Market.TWSE), anyInt())).thenReturn(List.of(delisting));
+        when(official.delistings(eq(Market.TWSE), anyInt())).thenReturn(List.of(officialEvent(delisting)));
         jdbc.update("INSERT INTO holdings(code, lots, buy_price) VALUES ('2888', 1, 10)");
 
         batch(repository, official, history, day, 7).enqueue();
@@ -62,7 +67,7 @@ class MarketStatusBatchTest {
         var day = LocalDate.of(2026, 11, 17);
         var delisting = new MarketEvent("6250", Market.TPEX, LocalDate.of(2016, 5, 25),
                 MarketEvent.Kind.DELISTED, "宇加");
-        when(official.delistings(Market.TPEX, 2016)).thenReturn(List.of(delisting));
+        when(official.delistings(Market.TPEX, 2016)).thenReturn(List.of(officialEvent(delisting)));
         jdbc.update("INSERT INTO holdings(code, lots, buy_price) VALUES ('6250', 1, 20)");
         assertTrue(repository.claimDay(day));
 
@@ -93,7 +98,7 @@ class MarketStatusBatchTest {
                 MarketEvent.Kind.DELISTED, "台原藥");
         when(official.transfersToTwse(2020)).thenReturn(List.of(transferFrom(previousEnd)));
         when(official.transfersToTwse(2019)).thenReturn(List.of(transferFrom(anotherEnd)));
-        when(official.delistings(Market.TPEX, 2019)).thenReturn(List.of(anotherEnd, actualEnd));
+        when(official.delistings(Market.TPEX, 2019)).thenReturn(List.of(officialEvent(anotherEnd), officialEvent(actualEnd)));
         assertTrue(repository.claimDay(day));
 
         var restart = batch(repository, official, history, day, 9);
@@ -105,15 +110,22 @@ class MarketStatusBatchTest {
         assertTrue(status.buyRestriction("1597", previousEnd.date()).isEmpty());
         assertTrue(status.buyRestriction("1597", previousEnd.date().minusDays(1)).isEmpty());
         assertTrue(repository.finalClose(previousEnd).isEmpty());
-        assertEquals(Market.TWSE, status.listingEvent("1597", day).orElseThrow().market());
+        assertEquals(new MarketStatusService.ListingStatus(Market.TWSE, previousEnd.date(), "直得", false),
+                status.quoteListing("1597", day).orElseThrow());
         assertEquals(Market.TWSE, status.listingEvent("1795", day).orElseThrow().market());
         assertEquals("已下櫃", status.delisting("4415").orElseThrow().label());
+        assertTrue(status.quoteListing("4415", day).orElseThrow().delisted());
         verify(official, times(1)).transfersToTwse(2020);
     }
 
-    private MarketEvent transferFrom(MarketEvent delisting) {
-        return new MarketEvent(delisting.code(), Market.TWSE, delisting.date(), MarketEvent.Kind.RELISTED,
-                delisting.name());
+    private OfficialMarketClient.Event transferFrom(MarketEvent delisting) {
+        return new OfficialMarketClient.Event(delisting.code(), Market.TWSE, delisting.date(),
+                OfficialMarketClient.Event.Kind.RELISTED, delisting.name());
+    }
+
+    private OfficialMarketClient.Event officialEvent(MarketEvent event) {
+        return new OfficialMarketClient.Event(event.code(), event.market(), event.date(),
+                OfficialMarketClient.Event.Kind.valueOf(event.kind().name()), event.name());
     }
 
     @Test
@@ -200,7 +212,7 @@ class MarketStatusBatchTest {
     }
 
     private Clock clock(LocalDate day, int hour) {
-        return Clock.fixed(ZonedDateTime.of(day.atTime(hour, 0), QuoteRefreshPolicy.TAIPEI).toInstant(),
-                QuoteRefreshPolicy.TAIPEI);
+        return Clock.fixed(ZonedDateTime.of(day.atTime(hour, 0), ZoneId.of("Asia/Taipei")).toInstant(),
+                ZoneId.of("Asia/Taipei"));
     }
 }

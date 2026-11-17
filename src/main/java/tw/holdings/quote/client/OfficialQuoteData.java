@@ -1,4 +1,4 @@
-package tw.holdings.quote;
+package tw.holdings.quote.client;
 
 import java.io.IOException;
 import java.math.BigDecimal;

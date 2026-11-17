@@ -10,22 +10,30 @@ import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.ArrayDeque;
-import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.JdbcTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import tw.holdings.quote.client.QuoteSource;
+import tw.holdings.quote.marketstatus.MarketStatusService;
+import tw.holdings.quote.marketstatus.MarketStatusService.ListingStatus;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @JdbcTest
+@Import({OfficialQuoteLookup.class, QuoteRefreshTest.QuoteSources.class})
 class QuoteRefreshTest {
     private static final String CODE = "2330";
     private static final LocalDate TUESDAY = LocalDate.of(2026, 11, 17);
@@ -34,7 +42,9 @@ class QuoteRefreshTest {
 
     @Autowired JdbcTemplate jdbc;
     private final TestClock clock = new TestClock();
-    private final Source source = new Source();
+    @Autowired Source source;
+    @Autowired OfficialQuoteLookup officialQuotes;
+    private final MarketStatusService markets = mock(MarketStatusService.class);
     private final ArrayDeque<Runnable> queue = new ArrayDeque<>();
     private final ExecutorService workers = mock(ExecutorService.class);
     private QuoteCacheRepository cache;
@@ -43,8 +53,10 @@ class QuoteRefreshTest {
     @BeforeEach
     void setup() {
         clock.set(TUESDAY, 10, 0);
+        source.calls = 0;
+        source.result = QuoteResult.notFound();
         cache = new QuoteCacheRepository(jdbc);
-        quotes = new QuoteService(cache, List.of(source), clock, workers, new MarketStatusService(new MarketStatusRepository(jdbc), clock));
+        quotes = new QuoteService(cache, officialQuotes, clock, workers, markets);
         doAnswer(task -> { task.<Runnable>getArgument(0).run(); return null; })
                 .when(workers).execute(any(Runnable.class));
     }
@@ -52,8 +64,8 @@ class QuoteRefreshTest {
     @Test
     void confirmedDelistingSuppressesAllNormalRequestsAndRelistingIgnoresOldPrices() {
         cache.save(TUESDAY, CODE, new QuoteCacheRepository.Entry(YESTERDAY, 0, 0, clock.instant()), clock.instant());
-        var markets = new MarketStatusRepository(jdbc);
-        markets.save(new MarketEvent(CODE, Market.TWSE, TUESDAY, MarketEvent.Kind.DELISTED, "台積電"));
+        when(markets.quoteListing(CODE, TUESDAY)).thenReturn(
+                Optional.of(new ListingStatus(Market.TWSE, TUESDAY, "台積電", true)));
         clock.set(TUESDAY, 14, 0);
         assertEquals(QuoteResult.Status.NOT_FOUND, quotes.forDisplay(CODE, Market.TWSE).status());
         assertEquals(QuoteResult.Status.NOT_FOUND, quotes.lookup(CODE, Market.TWSE).status());
@@ -62,7 +74,8 @@ class QuoteRefreshTest {
 
         var wednesday = TUESDAY.plusDays(1);
         clock.set(wednesday, 14, 0);
-        markets.save(new MarketEvent(CODE, Market.TWSE, wednesday, MarketEvent.Kind.RELISTED, "台積電"));
+        when(markets.quoteListing(CODE, wednesday)).thenReturn(
+                Optional.of(new ListingStatus(Market.TWSE, wednesday, "台積電", false)));
         source.result = YESTERDAY;
         var fromNewMarket = quotes.forDisplay(CODE, Market.TPEX);
         assertEquals(Market.TWSE, fromNewMarket.market());
@@ -137,7 +150,7 @@ class QuoteRefreshTest {
         assertEquals(4, source.calls);
 
         // 模擬應用程式換新實例，重試次數與最後行情仍從資料庫取得。
-        var restarted = new QuoteService(cache, List.of(source), clock, workers, new MarketStatusService(new MarketStatusRepository(jdbc), clock));
+        var restarted = new QuoteService(cache, officialQuotes, clock, workers, markets);
         restarted.refreshPendingCloses();
         assertEquals(YESTERDAY, restarted.forDisplay(CODE, Market.TWSE));
         assertEquals(4, source.calls);
@@ -179,6 +192,14 @@ class QuoteRefreshTest {
 
     private static QuoteResult found(LocalDate day, String close) {
         return new QuoteResult(QuoteResult.Status.FOUND, "台積電", Market.TWSE, new BigDecimal(close), day);
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class QuoteSources {
+        @Bean
+        Source quoteRefreshSource() {
+            return new Source();
+        }
     }
 
     private static class Source implements QuoteSource {

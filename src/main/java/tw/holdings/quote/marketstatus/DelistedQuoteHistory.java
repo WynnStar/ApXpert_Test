@@ -1,4 +1,4 @@
-package tw.holdings.quote;
+package tw.holdings.quote.marketstatus;
 
 import java.io.IOException;
 import java.time.LocalDate;
@@ -8,6 +8,9 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import tw.holdings.quote.Market;
+import tw.holdings.quote.QuoteResult;
+import tw.holdings.quote.client.QuoteSource;
 
 @Component
 class DelistedQuoteHistory {

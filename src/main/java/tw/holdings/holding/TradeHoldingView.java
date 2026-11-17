@@ -12,7 +12,7 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import tw.holdings.profit.ProfitCalculator;
 import tw.holdings.quote.Market;
-import tw.holdings.quote.MarketStatusService.Delisting;
+import tw.holdings.quote.marketstatus.MarketStatusService.Delisting;
 import tw.holdings.trade.TradeEntry;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)

@@ -1,4 +1,4 @@
-package tw.holdings.quote;
+package tw.holdings.quote.marketstatus;
 
 import java.time.Clock;
 import java.time.LocalTime;
@@ -42,6 +42,6 @@ class MarketStatusBatch {
     }
 
     private ZonedDateTime now() {
-        return clock.instant().atZone(QuoteRefreshPolicy.TAIPEI);
+        return ZonedDateTime.now(clock);
     }
 }
