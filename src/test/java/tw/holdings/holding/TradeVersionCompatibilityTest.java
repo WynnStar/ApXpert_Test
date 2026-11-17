@@ -223,6 +223,61 @@ class TradeVersionCompatibilityTest {
                 .andExpect(content().string(not(containsString("筆持股未取得收盤價"))));
     }
 
+    @Test
+    void futureDatesAreRejectedAndSameDayBuyBeforeSellWorks() throws Exception {
+        LocalDate today = LocalDate.now(java.time.ZoneId.of("Asia/Taipei"));
+        String future = today.plusDays(1).toString();
+        String buy = """
+                {"code":"2330","trade_date":"%s","shares":300,"unit_price":100}
+                """;
+        mvc.perform(get("/v2/holdings")).andExpect(status().isOk())
+                .andExpect(content().string(containsString("max=\"" + today + "\"")));
+        mvc.perform(post(V2).contentType(MediaType.APPLICATION_JSON).content(buy.formatted(future)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.error.message").value("交易日期不能晚於今天"));
+        mvc.perform(post("/v2/holdings").param("code", "2330")
+                        .param("tradeDate", future).param("shares", "300").param("unitPrice", "100"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("交易日期不能晚於今天")));
+        mvc.perform(get(V2)).andExpect(content().json("[]"));
+
+        var created = mvc.perform(post(V2).contentType(MediaType.APPLICATION_JSON).content(buy.formatted(today)))
+                .andExpect(status().isCreated()).andReturn();
+        long id = json.readTree(created.getResponse().getContentAsByteArray()).get("id").longValue();
+        String trades = V2 + "/" + id + "/trades";
+        String detail = "/v2/holdings/" + id;
+        String sell = """
+                {"side":"SELL","trade_date":"%s","shares":100,"unit_price":110}
+                """;
+        mvc.perform(get(detail)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("max=\"" + today + "\"")));
+        mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON).content(sell.formatted(future)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+        mvc.perform(post(detail + "/trades").param("side", "SELL")
+                        .param("tradeDate", future).param("shares", "100").param("unitPrice", "110"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("交易日期不能晚於今天")));
+        mvc.perform(get(trades)).andExpect(jsonPath("$.length()").value(1));
+
+        var past = today.minusDays(1);
+        mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON).content(sell.formatted(past)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("INSUFFICIENT_SHARES"))
+                .andExpect(jsonPath("$.error.message", containsString("請先補登過往的買進紀錄")));
+        mvc.perform(post(detail + "/trades").param("side", "SELL")
+                        .param("tradeDate", past.toString()).param("shares", "100").param("unitPrice", "110"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("請先補登過往的買進紀錄")));
+        mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON).content(sell.formatted(today)))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.shares").value(200));
+        mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON)
+                        .content(sell.formatted(today).replace("\"shares\":100", "\"shares\":201")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.message", not(containsString("請先補登"))));
+        mvc.perform(get(trades)).andExpect(jsonPath("$.length()").value(2));
+    }
+
     private long createLegacy(String body) throws Exception {
         var result = mvc.perform(post(V1).contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated()).andReturn();
