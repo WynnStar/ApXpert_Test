@@ -6,6 +6,10 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.Optional;
 
@@ -57,6 +61,7 @@ class QuoteCacheRepository {
         return jdbc.query("""
                 SELECT code, market FROM quote_cache
                 WHERE lookup_date = ? AND status <> 'NOT_FOUND'
+                    AND code IN (SELECT code FROM holdings)
                     AND (price_date IS NULL OR price_date < ?)
                     AND post_close_attempts < ?
                     AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
@@ -74,6 +79,52 @@ class QuoteCacheRepository {
                 """, day, code, result.status().name(), result.name(),
                 result.market() == null ? null : result.market().name(), result.close(), result.priceDate(),
                 utc(attemptedAt), utc(entry.nextAttemptAt()), entry.failureCount(), entry.postCloseAttempts());
+    }
+
+    void saveBatch(ZonedDateTime now, Map<String, QuoteResult> quotes) {
+        LocalDate day = now.toLocalDate();
+        Map<String, Entry> daily = new HashMap<>();
+        jdbc.query("""
+                SELECT code, status, stock_name, market, close_price, price_date,
+                       failure_count, post_close_attempts, next_attempt_at
+                FROM quote_cache WHERE lookup_date = ?
+                """, (org.springframework.jdbc.core.RowCallbackHandler) row -> {
+                    OffsetDateTime next = row.getObject("next_attempt_at", OffsetDateTime.class);
+                    daily.put(row.getString("code"), new Entry(readResult(row), row.getInt("failure_count"),
+                            row.getInt("post_close_attempts"), next == null ? null : next.toInstant()));
+                }, day);
+        Map<String, QuoteResult> latest = new HashMap<>();
+        jdbc.query("""
+                SELECT code, status, stock_name, market, close_price, price_date
+                FROM quote_cache WHERE lookup_date <= ? AND status = 'FOUND'
+                QUALIFY ROW_NUMBER() OVER (
+                    PARTITION BY code ORDER BY price_date DESC NULLS LAST, lookup_date DESC
+                ) = 1
+                """, (org.springframework.jdbc.core.RowCallbackHandler) row ->
+                        latest.put(row.getString("code"), readResult(row)), day);
+
+        var values = new ArrayList<Object[]>();
+        boolean postClose = QuoteRefreshPolicy.isPostClose(now);
+        Instant next = now.toInstant().plus(QuoteRefreshPolicy.retryDelay(postClose, 0));
+        for (var item : quotes.entrySet()) {
+            QuoteResult result = item.getValue();
+            QuoteResult prior = latest.get(item.getKey());
+            // 官方批次檔可能較晚更新，保留較新的實際交易價格。
+            if (prior != null && prior.priceDate() != null
+                    && (result.priceDate() == null || result.priceDate().isBefore(prior.priceDate()))) {
+                result = prior;
+            }
+            Entry old = daily.get(item.getKey());
+            int attempts = (old == null ? 0 : old.postCloseAttempts()) + (postClose ? 1 : 0);
+            values.add(new Object[] { day, item.getKey(), result.status().name(), result.name(),
+                    result.market().name(), result.close(), result.priceDate(), utc(now.toInstant()),
+                    utc(next), 0, attempts });
+        }
+        jdbc.batchUpdate("""
+                MERGE INTO quote_cache (lookup_date, code, status, stock_name, market, close_price, price_date,
+                    last_attempt_at, next_attempt_at, failure_count, post_close_attempts)
+                KEY (lookup_date, code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, values);
     }
 
     private static QuoteResult readResult(ResultSet row) throws SQLException {

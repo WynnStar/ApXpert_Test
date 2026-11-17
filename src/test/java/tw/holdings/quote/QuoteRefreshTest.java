@@ -44,6 +44,7 @@ class QuoteRefreshTest {
     private final TestClock clock = new TestClock();
     @Autowired Source source;
     @Autowired OfficialQuoteLookup officialQuotes;
+    private final BatchQuoteService batches = mock(BatchQuoteService.class);
     private final MarketStatusService markets = mock(MarketStatusService.class);
     private final ArrayDeque<Runnable> queue = new ArrayDeque<>();
     private final ExecutorService workers = mock(ExecutorService.class);
@@ -55,15 +56,19 @@ class QuoteRefreshTest {
         clock.set(TUESDAY, 10, 0);
         source.calls = 0;
         source.result = QuoteResult.notFound();
+        when(batches.lookup(any(), any())).thenAnswer(invocation -> {
+            source.calls++;
+            return Optional.of(source.result);
+        });
         cache = new QuoteCacheRepository(jdbc);
-        quotes = new QuoteService(cache, officialQuotes, clock, workers, markets);
+        quotes = new QuoteService(cache, officialQuotes, clock, workers, markets, batches);
         doAnswer(task -> { task.<Runnable>getArgument(0).run(); return null; })
                 .when(workers).execute(any(Runnable.class));
     }
 
     @Test
     void confirmedDelistingSuppressesAllNormalRequestsAndRelistingIgnoresOldPrices() {
-        cache.save(TUESDAY, CODE, new QuoteCacheRepository.Entry(YESTERDAY, 0, 0, clock.instant()), clock.instant());
+        seed(TUESDAY, YESTERDAY);
         when(markets.quoteListing(CODE, TUESDAY)).thenReturn(
                 Optional.of(new ListingStatus(Market.TWSE, TUESDAY, "台積電", true)));
         clock.set(TUESDAY, 14, 0);
@@ -150,7 +155,7 @@ class QuoteRefreshTest {
         assertEquals(4, source.calls);
 
         // 模擬應用程式換新實例，重試次數與最後行情仍從資料庫取得。
-        var restarted = new QuoteService(cache, officialQuotes, clock, workers, markets);
+        var restarted = new QuoteService(cache, officialQuotes, clock, workers, markets, batches);
         restarted.refreshPendingCloses();
         assertEquals(YESTERDAY, restarted.forDisplay(CODE, Market.TWSE));
         assertEquals(4, source.calls);
@@ -182,6 +187,7 @@ class QuoteRefreshTest {
     }
 
     private void seed(LocalDate day, QuoteResult result) {
+        jdbc.update("INSERT INTO holdings (code, lots, buy_price, v2_managed) VALUES (?, 1, 100, FALSE)", CODE);
         cache.save(day, CODE, new QuoteCacheRepository.Entry(result, 0, 0, clock.instant()), clock.instant());
     }
 

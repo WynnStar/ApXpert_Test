@@ -4,6 +4,8 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.util.Optional;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -24,15 +26,17 @@ public class QuoteService {
     private static final Logger LOGGER = LoggerFactory.getLogger(QuoteService.class);
     private final QuoteCacheRepository cache;
     private final OfficialQuoteLookup officialQuotes;
+    private final BatchQuoteService batchQuotes;
     private final Clock clock;
     private final MarketStatusService markets;
     private final ExecutorService quoteWorkers;
     private final ConcurrentHashMap<String, CompletableFuture<QuoteResult>> inFlight = new ConcurrentHashMap<>();
 
     QuoteService(QuoteCacheRepository cache, OfficialQuoteLookup officialQuotes, Clock clock,
-                 ExecutorService quoteWorkers, MarketStatusService markets) {
+                 ExecutorService quoteWorkers, MarketStatusService markets, BatchQuoteService batchQuotes) {
         this.cache = cache;
         this.officialQuotes = officialQuotes;
+        this.batchQuotes = batchQuotes;
         this.clock = clock;
         this.markets = markets;
         this.quoteWorkers = quoteWorkers;
@@ -96,8 +100,10 @@ public class QuoteService {
     void refreshPendingCloses() {
         ZonedDateTime now = taipeiNow();
         if (QuoteRefreshPolicy.isPostClose(now)) {
+            Set<Market> queuedMarkets = new HashSet<>();
             cache.dueAfterClose(now.toLocalDate(), now.toInstant())
                     .stream().filter(due -> !isDelisted(markets.quoteListing(due.code(), now.toLocalDate()).orElse(null)))
+                    .filter(due -> queuedMarkets.add(due.market()))
                     .forEach(due -> submit(due.code(), due.market(), false));
         }
     }
@@ -153,7 +159,8 @@ public class QuoteService {
                 : hint != null ? hint : last == null ? null : last.market();
         boolean postClose = QuoteRefreshPolicy.isPostClose(now);
         boolean onlyCurrentMonth = postClose && last != null && last.close() != null;
-        QuoteResult result = officialQuotes.lookup(code, market, day, onlyCurrentMonth);
+        QuoteResult result = batchQuotes.lookup(code, market).orElseGet(() ->
+                validation ? officialQuotes.lookup(code, market, day, onlyCurrentMonth) : QuoteResult.unavailable());
         if (listing != null && result.priceDate() != null && result.priceDate().isBefore(listing.effectiveDate())) {
             result = QuoteResult.found(listing.name(), market, null, null);
         }
