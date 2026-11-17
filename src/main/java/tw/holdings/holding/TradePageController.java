@@ -1,7 +1,6 @@
 package tw.holdings.holding;
 
 import java.time.LocalDate;
-import java.time.ZoneId;
 
 import jakarta.validation.Valid;
 
@@ -80,19 +79,21 @@ class TradePageController {
     }
 
     private TradeInput emptyForm() {
-        LocalDate today = LocalDate.now(ZoneId.of("Asia/Taipei"));
+        LocalDate today = service.today();
         return new TradeInput(null, null, today, null, null, false);
     }
 
     private String showList(Model model) {
         var holdings = service.list();
         model.addAttribute("holdings", holdings);
+        model.addAttribute("maxTradeDate", service.today());
         model.addAttribute("summary", TradePortfolioSummary.from(holdings));
         return "trades/list";
     }
 
     private String showDetail(long id, Model model) {
         model.addAttribute("history", service.history(id));
+        model.addAttribute("maxTradeDate", service.today());
         return "trades/detail";
     }
 }
