@@ -96,16 +96,59 @@ class TradeHoldingService {
 
     DeleteTarget deleteTarget(long id) {
         Holding holding = holdings.findById(id).orElseThrow(() -> new HoldingNotFoundException(id));
-        return new DeleteTarget(holding.id(), holding.code(), holding.name());
+        return DeleteTarget.from(holding);
     }
 
     record DeleteTarget(long id, String code, String name) {
+        static DeleteTarget from(Holding holding) {
+            return new DeleteTarget(holding.id(), holding.code(), holding.name());
+        }
+    }
+
+    record TradeDeleteTarget(DeleteTarget holding, TradeEntry entry, boolean lastTrade, boolean v2Managed) {
+    }
+
+    enum TradeDeletion {
+        TRADE_DELETED, HOLDING_DELETED, CONFIRM_AGAIN
+    }
+
+    TradeDeleteTarget tradeDeleteTarget(long id, long tradeId) {
+        Holding holding = holdings.findById(id).orElseThrow(() -> new HoldingNotFoundException(id));
+        var entries = ledger.entries(id);
+        return new TradeDeleteTarget(DeleteTarget.from(holding), findTrade(entries, tradeId),
+                entries.size() == 1, holding.isV2Managed());
+    }
+
+    @Transactional
+    public TradeDeletion deleteTrade(long id, long tradeId, boolean confirmedLastTrade) {
+        Holding holding = holdings.lockById(id).orElseThrow(() -> new HoldingNotFoundException(id));
+        var entries = ledger.entries(id);
+        findTrade(entries, tradeId);
+        boolean lastTrade = entries.size() == 1;
+        if (lastTrade != confirmedLastTrade) {
+            return TradeDeletion.CONFIRM_AGAIN;
+        }
+        if (lastTrade) {
+            deleteHolding(holding);
+            return TradeDeletion.HOLDING_DELETED;
+        }
+        ledger.removeTrade(id, tradeId, holding.code());
+        return TradeDeletion.TRADE_DELETED;
+    }
+
+    private TradeEntry findTrade(List<TradeEntry> entries, long tradeId) {
+        return entries.stream().filter(entry -> entry.id() == tradeId).findFirst()
+                .orElseThrow(() -> new HoldingTradeNotFoundException(tradeId));
     }
 
     @Transactional
     public void delete(long id) {
         Holding holding = holdings.lockById(id).orElseThrow(() -> new HoldingNotFoundException(id));
-        ledger.removeTrades(id);
+        deleteHolding(holding);
+    }
+
+    private void deleteHolding(Holding holding) {
+        ledger.removeTrades(holding.id());
         holdings.delete(holding);
     }
 

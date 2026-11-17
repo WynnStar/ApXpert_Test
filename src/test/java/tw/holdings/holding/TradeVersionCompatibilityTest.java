@@ -31,6 +31,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.flash;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = "spring.datasource.url=jdbc:h2:mem:app-v1-api-test;DB_CLOSE_DELAY=-1")
@@ -400,6 +401,142 @@ class TradeVersionCompatibilityTest {
         mvc.perform(get(V2 + "/" + other + "/trades")).andExpect(jsonPath("$.length()").value(1));
         org.junit.jupiter.api.Assertions.assertEquals(0L, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM holding_trades WHERE holding_id = ?", Long.class, id));
+    }
+
+    @Test
+    void deletingASaleKeepsOtherTradesAndRecalculatesThePosition() throws Exception {
+        var created = mvc.perform(post(V2).contentType(MediaType.APPLICATION_JSON).content("""
+                {"code":"2330","trade_date":"2026-11-16","shares":100,"unit_price":10}
+                """)).andExpect(status().isCreated()).andReturn();
+        long id = json.readTree(created.getResponse().getContentAsByteArray()).get("id").longValue();
+        String api = V2 + "/" + id;
+        String detail = "/v2/holdings/" + id;
+        mvc.perform(post(api + "/trades").contentType(MediaType.APPLICATION_JSON).content("""
+                {"side":"BUY","trade_date":"2026-11-16","shares":100,"unit_price":20}
+                """)).andExpect(status().isCreated());
+        mvc.perform(post(api + "/trades").contentType(MediaType.APPLICATION_JSON).content("""
+                {"side":"SELL","trade_date":"2026-11-16","shares":100,"unit_price":30}
+                """)).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.realized_pnl").value(1451));
+        String deletePage = tradeDeletePage(id, "SELL");
+
+        mvc.perform(get(detail)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("href=\"" + deletePage + "\">刪除")));
+        mvc.perform(get(deletePage)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("<dd>賣出</dd>")))
+                .andExpect(content().string(containsString("<dd>2026-11-16</dd>")))
+                .andExpect(content().string(containsString("<dd>100</dd>")))
+                .andExpect(content().string(containsString("<dd>30.00</dd>")))
+                .andExpect(content().string(containsString("href=\"" + detail + "\">取消")))
+                .andExpect(content().string(containsString("action=\"" + deletePage + "\"")));
+        mvc.perform(get(detail)).andExpect(status().isOk());
+        mvc.perform(get(api + "/trades")).andExpect(jsonPath("$.length()").value(3));
+
+        mvc.perform(post(deletePage).param("lastTrade", "false"))
+                .andExpect(redirectedUrl(detail))
+                .andExpect(flash().attribute("notice", "已刪除交易紀錄"));
+        mvc.perform(get(api)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.shares").value(200))
+                .andExpect(jsonPath("$.remaining_cost").value(3040))
+                .andExpect(jsonPath("$.average_cost").value(15.2))
+                .andExpect(jsonPath("$.realized_pnl").value(0))
+                .andExpect(jsonPath("$.unrealized_pnl").value(20854));
+        mvc.perform(get(api + "/trades")).andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].unit_price").value(10))
+                .andExpect(jsonPath("$[1].unit_price").value(20));
+        mvc.perform(post(deletePage).param("lastTrade", "false")).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void deletingOpeningOrBuyRollsBackWhenThereWouldBeAHistoricalOversale() throws Exception {
+        long id = createLegacy(OLD_BUY);
+        String api = V2 + "/" + id;
+        String detail = "/v2/holdings/" + id;
+        mvc.perform(post(api + "/trades").contentType(MediaType.APPLICATION_JSON).content(NEW_BUY))
+                .andExpect(status().isCreated());
+        mvc.perform(post(api + "/trades").contentType(MediaType.APPLICATION_JSON).content("""
+                {"side":"SELL","trade_date":"2026-11-17","shares":2100,"unit_price":170}
+                """)).andExpect(status().isCreated());
+        String openingDelete = tradeDeletePage(id, "OPENING");
+        String buyDelete = tradeDeletePage(id, "BUY");
+        mvc.perform(get(openingDelete)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("<dd>期初持股</dd>")))
+                .andExpect(content().string(containsString("由 1.0 帶入，無交易日期")))
+                .andExpect(content().string(containsString("<dd>2000</dd>")))
+                .andExpect(content().string(containsString("<dd>150.00</dd>")));
+        mvc.perform(get(buyDelete)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("<dd>買進</dd>")));
+
+        var rejected = mvc.perform(post(openingDelete).param("lastTrade", "false"))
+                .andExpect(redirectedUrl(detail))
+                .andExpect(flash().attribute("deleteError", containsString("2026-11-17 賣出 2100 股，當時僅持有 300 股")))
+                .andReturn();
+        mvc.perform(get(detail).flashAttrs(rejected.getFlashMap())).andExpect(status().isOk())
+                .andExpect(content().string(containsString("刪除後會發生超賣")));
+        mvc.perform(post(buyDelete).param("lastTrade", "false"))
+                .andExpect(redirectedUrl(detail))
+                .andExpect(flash().attribute("deleteError", containsString("當時僅持有 2000 股")));
+        mvc.perform(get(api + "/trades")).andExpect(jsonPath("$.length()").value(3))
+                .andExpect(jsonPath("$[0].side").value("OPENING"))
+                .andExpect(jsonPath("$[1].side").value("BUY"))
+                .andExpect(jsonPath("$[2].side").value("SELL"));
+
+        mvc.perform(post(tradeDeletePage(id, "SELL")).param("lastTrade", "false")).andExpect(redirectedUrl(detail));
+        mvc.perform(post(openingDelete).param("lastTrade", "false")).andExpect(redirectedUrl(detail));
+        mvc.perform(get(api)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.shares").value(300))
+                .andExpect(jsonPath("$.remaining_cost").value(48068))
+                .andExpect(jsonPath("$.v2_managed").value(true));
+    }
+
+    @Test
+    void deletingTheLastOpeningTradeRequiresExplicitWholeHoldingConfirmation() throws Exception {
+        long id = createLegacy(OLD_BUY);
+        String deletePage = tradeDeletePage(id, "OPENING");
+        mvc.perform(get(deletePage)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("這是最後一筆交易")))
+                .andExpect(content().string(containsString("移除所有交易和已實現損益紀錄")))
+                .andExpect(content().string(containsString("App 1.0 重新整理後")))
+                .andExpect(content().string(containsString("name=\"lastTrade\" value=\"true\"")));
+        mvc.perform(post(deletePage)).andExpect(status().isBadRequest());
+        mvc.perform(post(deletePage).param("lastTrade", "false")).andExpect(redirectedUrl(deletePage))
+                .andExpect(flash().attribute("deleteError", containsString("重新確認刪除範圍")));
+        mvc.perform(get(V1 + "/" + id)).andExpect(status().isOk());
+
+        mvc.perform(post(deletePage).param("lastTrade", "true")).andExpect(redirectedUrl("/v2/holdings"));
+        mvc.perform(get(V1 + "/" + id)).andExpect(status().isNotFound());
+        mvc.perform(get(V2 + "/" + id)).andExpect(status().isNotFound());
+        org.junit.jupiter.api.Assertions.assertEquals(0L, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM holding_trades WHERE holding_id = ?", Long.class, id));
+    }
+
+    @Test
+    void staleLastTradeConfirmationAndForeignTradeIdCannotRemoveRecords() throws Exception {
+        long id = createLegacy(OLD_BUY);
+        long other = createLegacy(OLD_BUY.replace("0050", "2330"));
+        String api = V2 + "/" + id;
+        String deletePage = tradeDeletePage(id, "OPENING");
+        String foreignTrade = tradeDeletePage(other, "OPENING")
+                .replace("/holdings/" + other + "/", "/holdings/" + id + "/");
+        mvc.perform(get(foreignTrade)).andExpect(status().isNotFound());
+        mvc.perform(post(foreignTrade).param("lastTrade", "true")).andExpect(status().isNotFound());
+        mvc.perform(get(deletePage)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("這是最後一筆交易")));
+
+        mvc.perform(post(api + "/trades").contentType(MediaType.APPLICATION_JSON).content(NEW_BUY))
+                .andExpect(status().isCreated());
+        mvc.perform(post(deletePage).param("lastTrade", "true")).andExpect(redirectedUrl(deletePage))
+                .andExpect(flash().attribute("deleteError", containsString("重新確認刪除範圍")));
+        mvc.perform(get(api + "/trades")).andExpect(jsonPath("$.length()").value(2));
+        mvc.perform(get(V2 + "/" + other + "/trades")).andExpect(jsonPath("$.length()").value(1));
+        mvc.perform(get(deletePage)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("確認刪除此筆交易")));
+    }
+
+    private String tradeDeletePage(long holdingId, String side) {
+        long tradeId = jdbc.queryForObject("SELECT id FROM holding_trades WHERE holding_id = ? AND side = ?",
+                Long.class, holdingId, side);
+        return "/v2/holdings/" + holdingId + "/trades/" + tradeId + "/delete";
     }
 
     private long createLegacy(String body) throws Exception {

@@ -12,6 +12,7 @@
     <h1 th:text="|${holding.code} ${holding.name ?: ''} 交易紀錄|"></h1>
     <p th:if="${notice}" th:text="${notice}" role="status"></p>
     <p th:if="${orderError}" th:text="${orderError}" role="alert"></p>
+    <p th:if="${deleteError}" th:text="${deleteError}" role="alert"></p>
     <dl>
         <dt>總股數</dt><dd th:text="${holding.shares}"></dd>
         <dt>每股平均成本（含費）</dt><dd th:text="${holding.displayAverageCost() ?: '—'}"></dd>
@@ -21,7 +22,7 @@
 
     <table>
         <caption>交易紀錄</caption>
-        <thead><tr><th>日期</th><th>方向</th><th>股數</th><th>每股價格</th><th>調整同日順序</th></tr></thead>
+        <thead><tr><th>日期</th><th>方向</th><th>股數</th><th>每股價格</th><th>調整同日順序</th><th>操作</th></tr></thead>
         <tbody>
         <tr th:each="entry : ${history.trades}">
             <td th:text="${entry.tradeDate ?: '—'}"></td>
@@ -35,6 +36,7 @@
                     <button th:if="${entry.canMoveDown}" type="submit" name="direction" value="DOWN">下移</button>
                 </form>
             </td>
+            <td><a th:href="@{/v2/holdings/{id}/trades/{tradeId}/delete(id=${holding.id},tradeId=${entry.id})}">刪除</a></td>
         </tr>
         </tbody>
     </table>

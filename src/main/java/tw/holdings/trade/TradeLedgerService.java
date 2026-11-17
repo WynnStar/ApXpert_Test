@@ -69,6 +69,13 @@ public class TradeLedgerService {
         repository.deleteByHolding(holdingId);
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void removeTrade(long holdingId, long tradeId, String code) {
+        repository.deleteTrade(holdingId, tradeId);
+        // 若剩餘交易存在超賣，保留原始紀錄。
+        TradeLedger.replay(code, trades(holdingId));
+    }
+
     @Transactional
     public TradePosition recordTrade(long holdingId, Trade trade) {
         String code = repository.lockHoldingCode(holdingId)
