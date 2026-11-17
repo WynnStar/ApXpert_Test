@@ -22,6 +22,7 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -50,6 +51,8 @@ class TradeVersionCompatibilityTest {
 
     @BeforeEach
     void setup() {
+        doAnswer(invocation -> quotes.lookup(invocation.getArgument(0), invocation.getArgument(1)))
+                .when(quotes).forDisplay(org.mockito.ArgumentMatchers.anyString(), nullable(Market.class));
         jdbc.update("DELETE FROM holding_trades");
         jdbc.update("DELETE FROM holdings");
         fixedQuote("0050", "元大台灣50", "170.00");
