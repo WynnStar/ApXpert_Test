@@ -1,9 +1,7 @@
 package tw.holdings.holding;
 
 import java.sql.SQLException;
-import java.time.Clock;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.List;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -27,16 +25,16 @@ class TradeHoldingService {
     private final QuoteService quotes;
     private final MarketStatusService markets;
     private final TransactionTemplate transactions;
-    private final Clock clock;
+    private final TradeDateRules dates;
 
     TradeHoldingService(HoldingRepository holdings, TradeLedgerService ledger,
-                        QuoteService quotes, TransactionTemplate transactions, Clock clock, MarketStatusService markets) {
+                        QuoteService quotes, TransactionTemplate transactions, TradeDateRules dates, MarketStatusService markets) {
         this.holdings = holdings;
         this.ledger = ledger;
         this.quotes = quotes;
         this.markets = markets;
         this.transactions = transactions;
-        this.clock = clock;
+        this.dates = dates;
     }
 
     List<TradeHoldingView> list() {
@@ -47,12 +45,8 @@ class TradeHoldingService {
         return history(holdings.findById(id).orElseThrow(() -> new HoldingNotFoundException(id)));
     }
 
-    LocalDate today() {
-        return LocalDate.ofInstant(clock.instant(), ZoneId.of("Asia/Taipei"));
-    }
-
     long create(String code, Trade firstBuy) {
-        validateTradeDate(firstBuy, today());
+        dates.validateNew(code, firstBuy.tradeDate(), dates.today());
         validateBuy(code, firstBuy);
         if (holdings.existsByCode(code)) {
             throw new DuplicateHoldingException(code, null);
@@ -67,6 +61,7 @@ class TradeHoldingService {
 
         try {
             return transactions.execute(status -> {
+                dates.validateNew(code, firstBuy.tradeDate(), dates.today());
                 validateBuy(code, firstBuy);
                 Holding holding = holdings.saveAndFlush(Holding.managed(code, identity.name(), identity.market()));
                 ledger.recordTrade(holding.id(), firstBuy);
@@ -83,9 +78,9 @@ class TradeHoldingService {
 
     @Transactional
     public void append(long id, Trade trade, boolean confirmV2) {
-        LocalDate currentDate = today();
-        validateTradeDate(trade, currentDate);
+        LocalDate currentDate = dates.today();
         Holding holding = holdings.lockById(id).orElseThrow(() -> new HoldingNotFoundException(id));
+        dates.validateNew(holding.code(), trade.tradeDate(), currentDate);
         validateBuy(holding.code(), trade);
         if (!holding.isV2Managed()) {
             if (!confirmV2) {
@@ -134,7 +129,7 @@ class TradeHoldingService {
         TradeEntry original = findTrade(ledger.entries(id), tradeId);
         Trade edited = form.applyTo(original.trade().side());
         if (edited.side() != Trade.Side.OPENING) {
-            validateTradeDate(edited, today());
+            dates.validateEdit(holding.code(), edited.tradeDate());
             validateBuy(holding.code(), edited);
         }
         if (!holding.isV2Managed()) {
@@ -197,12 +192,6 @@ class TradeHoldingService {
             markets.buyRestriction(code, trade.tradeDate()).ifPresent(message -> {
                 throw new HoldingApiController.ApiValidationException(message);
             });
-        }
-    }
-
-    private void validateTradeDate(Trade trade, LocalDate currentDate) {
-        if (trade.tradeDate().isAfter(currentDate)) {
-            throw new HoldingApiController.ApiValidationException("交易日期不能晚於今天");
         }
     }
 
