@@ -87,7 +87,7 @@ class QuoteRefreshTest {
         assertNull(fromNewMarket.close());
         assertNull(quotes.lookup(CODE, Market.TPEX).close());
         assertEquals(1, source.calls);
-        clock.advance(301);
+        clock.set(wednesday, 15, 5);
         source.result = found(wednesday, "112.00");
         quotes.refreshPendingCloses();
         assertEquals(new BigDecimal("112.00"), quotes.forDisplay(CODE, Market.TWSE).close());
@@ -95,16 +95,16 @@ class QuoteRefreshTest {
     }
 
     @Test
-    void retriesFirstFailureAfterThirtySecondsAndBacksOffRepeatedFailures() {
+    void retriesPreCloseFailureAfterThirtyMinutesAndKeepsSuccessfulCache() {
         source.result = QuoteResult.unavailable();
         assertEquals(QuoteResult.Status.UNAVAILABLE, quotes.lookup(CODE, null).status());
-        clock.advance(29);
+        clock.advance(1799);
         quotes.lookup(CODE, null);
         assertEquals(1, source.calls);
         clock.advance(1);
         quotes.lookup(CODE, null);
         assertEquals(2, source.calls);
-        clock.advance(59);
+        clock.advance(1799);
         quotes.lookup(CODE, null);
         assertEquals(2, source.calls);
 
@@ -119,7 +119,7 @@ class QuoteRefreshTest {
     void backgroundRefreshIsCoalescedAndReturnsCachedValueWithoutWaiting() {
         seed(TUESDAY, YESTERDAY);
         defersWork();
-        clock.set(TUESDAY, 13, 30);
+        clock.set(TUESDAY, 13, 35);
         source.result = TODAY;
 
         assertEquals(YESTERDAY, quotes.forDisplay(CODE, Market.TWSE));
@@ -137,28 +137,46 @@ class QuoteRefreshTest {
     }
 
     @Test
-    void stopsAfterFourPostCloseAttemptsAndKeepsLatestKnownPrice() {
+    void usesOnlyTwoSlotsAndKeepsTheirStateAcrossServiceRestart() {
         seed(TUESDAY, YESTERDAY);
-        clock.set(TUESDAY, 13, 30);
         source.result = QuoteResult.unavailable();
-        for (int attempt = 1; attempt <= 4; attempt++) {
-            quotes.refreshPendingCloses();
-            assertEquals(attempt, source.calls);
-            assertEquals(YESTERDAY, quotes.forDisplay(CODE, Market.TWSE));
-            clock.advance(299);
-            quotes.refreshPendingCloses();
-            assertEquals(attempt, source.calls);
-            clock.advance(1);
-        }
+        clock.set(TUESDAY, 13, 34);
         quotes.refreshPendingCloses();
-        assertEquals(YESTERDAY, quotes.forDisplay(CODE, Market.TWSE));
-        assertEquals(4, source.calls);
+        assertEquals(0, source.calls);
 
-        // 模擬應用程式換新實例，重試次數與最後行情仍從資料庫取得。
+        clock.set(TUESDAY, 13, 35);
+        quotes.refreshPendingCloses();
+        assertEquals(1, source.calls);
+        assertEquals(YESTERDAY, quotes.forDisplay(CODE, Market.TWSE));
+
         var restarted = new QuoteService(cache, officialQuotes, clock, workers, markets, batches);
+        clock.set(TUESDAY, 14, 5);
         restarted.refreshPendingCloses();
+        clock.set(TUESDAY, 15, 4);
+        restarted.refreshPendingCloses();
+        assertEquals(1, source.calls);
+
+        clock.set(TUESDAY, 15, 5);
+        restarted.refreshPendingCloses();
+        assertEquals(2, source.calls);
+        clock.set(TUESDAY, 23, 59);
+        restarted.refreshPendingCloses();
+        assertEquals(2, source.calls);
         assertEquals(YESTERDAY, restarted.forDisplay(CODE, Market.TWSE));
-        assertEquals(4, source.calls);
+        assertEquals(2, cache.find(TUESDAY, CODE).orElseThrow().postCloseAttempts());
+    }
+
+    @Test
+    void scheduledRefreshFindsHeldStocksEvenWithoutTodaysPageVisit() {
+        seed(TUESDAY.minusDays(1), YESTERDAY);
+        source.result = TODAY;
+        clock.set(TUESDAY, 15, 20);
+
+        quotes.refreshPendingCloses();
+        assertEquals(1, source.calls);
+        assertEquals(TODAY, quotes.forDisplay(CODE, Market.TWSE));
+        quotes.refreshPendingCloses();
+        assertEquals(1, source.calls);
     }
 
     @Test

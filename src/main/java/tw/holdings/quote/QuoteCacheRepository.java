@@ -9,8 +9,8 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -18,7 +18,11 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 class QuoteCacheRepository {
-    record Entry(QuoteResult result, int failureCount, int postCloseAttempts, Instant nextAttemptAt) {
+    record Entry(QuoteResult result, int failureCount, int postCloseAttempts,
+                 Instant nextAttemptAt, Instant lastAttemptAt) {
+        Entry(QuoteResult result, int failureCount, int postCloseAttempts, Instant nextAttemptAt) {
+            this(result, failureCount, postCloseAttempts, nextAttemptAt, null);
+        }
     }
 
     record DueCode(String code, Market market) {
@@ -33,13 +37,9 @@ class QuoteCacheRepository {
     Optional<Entry> find(LocalDate day, String code) {
         return jdbc.query("""
                 SELECT status, stock_name, market, close_price, price_date,
-                       failure_count, post_close_attempts, next_attempt_at
+                       failure_count, post_close_attempts, next_attempt_at, last_attempt_at
                 FROM quote_cache WHERE lookup_date = ? AND code = ?
-                """, (row, index) -> {
-                    OffsetDateTime next = row.getObject("next_attempt_at", OffsetDateTime.class);
-                    return new Entry(readResult(row), row.getInt("failure_count"),
-                            row.getInt("post_close_attempts"), next == null ? null : next.toInstant());
-                }, day, code).stream().findFirst();
+                """, (row, index) -> readEntry(row), day, code).stream().findFirst();
     }
 
     Optional<QuoteResult> latestFound(LocalDate day, String code) {
@@ -57,17 +57,35 @@ class QuoteCacheRepository {
                 market == null ? null : market.name(), market == null ? null : market.name()).stream().findFirst();
     }
 
-    List<DueCode> dueAfterClose(LocalDate day, Instant now) {
+    List<DueCode> dueAfterClose(ZonedDateTime now) {
         return jdbc.query("""
-                SELECT code, market FROM quote_cache
-                WHERE lookup_date = ? AND status <> 'NOT_FOUND'
-                    AND code IN (SELECT code FROM holdings)
-                    AND (price_date IS NULL OR price_date < ?)
-                    AND post_close_attempts < ?
-                    AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-                ORDER BY next_attempt_at ASC NULLS FIRST, code
+                SELECT h.code, COALESCE(c.market, h.market) AS market
+                FROM holdings h LEFT JOIN quote_cache c ON c.code = h.code AND c.lookup_date = ?
+                WHERE (c.status IS NULL OR c.status <> 'NOT_FOUND')
+                    AND (c.price_date IS NULL OR c.price_date < ?)
+                    AND (c.last_attempt_at IS NULL OR c.last_attempt_at < ?)
+                    AND (c.next_attempt_at IS NULL OR c.next_attempt_at <= ?)
+                ORDER BY c.next_attempt_at ASC NULLS FIRST, h.code
                 """, (row, index) -> new DueCode(row.getString("code"), readMarket(row)),
-                day, day, QuoteRefreshPolicy.MAX_POST_CLOSE_ATTEMPTS, utc(now));
+                now.toLocalDate(), now.toLocalDate(), utc(QuoteRefreshPolicy.slotStart(now)), utc(now.toInstant()));
+    }
+
+    Optional<Entry> lastMarketAttempt(LocalDate day, Market market) {
+        return jdbc.query("""
+                SELECT status, stock_name, market, close_price, price_date, failure_count,
+                       post_close_attempts, next_attempt_at, last_attempt_at
+                FROM quote_cache WHERE lookup_date = ? AND market = ? AND last_attempt_at IS NOT NULL
+                ORDER BY last_attempt_at DESC, price_date DESC NULLS LAST FETCH FIRST 1 ROW ONLY
+                """, (row, index) -> readEntry(row), day, market.name()).stream().findFirst();
+    }
+
+    void markBatchFailure(ZonedDateTime now, Market market) {
+        jdbc.update("""
+                UPDATE quote_cache SET failure_count = failure_count + 1,
+                    post_close_attempts = post_close_attempts + ?, last_attempt_at = ?, next_attempt_at = ?
+                WHERE lookup_date = ? AND market = ?
+                """, QuoteRefreshPolicy.isPostClose(now) ? 1 : 0, utc(now.toInstant()),
+                utc(QuoteRefreshPolicy.nextAttemptAt(now, true)), now.toLocalDate(), market.name());
     }
 
     void save(LocalDate day, String code, Entry entry, Instant attemptedAt) {
@@ -86,12 +104,10 @@ class QuoteCacheRepository {
         Map<String, Entry> daily = new HashMap<>();
         jdbc.query("""
                 SELECT code, status, stock_name, market, close_price, price_date,
-                       failure_count, post_close_attempts, next_attempt_at
+                       failure_count, post_close_attempts, next_attempt_at, last_attempt_at
                 FROM quote_cache WHERE lookup_date = ?
                 """, (org.springframework.jdbc.core.RowCallbackHandler) row -> {
-                    OffsetDateTime next = row.getObject("next_attempt_at", OffsetDateTime.class);
-                    daily.put(row.getString("code"), new Entry(readResult(row), row.getInt("failure_count"),
-                            row.getInt("post_close_attempts"), next == null ? null : next.toInstant()));
+                    daily.put(row.getString("code"), readEntry(row));
                 }, day);
         Map<String, QuoteResult> latest = new HashMap<>();
         jdbc.query("""
@@ -105,7 +121,7 @@ class QuoteCacheRepository {
 
         var values = new ArrayList<Object[]>();
         boolean postClose = QuoteRefreshPolicy.isPostClose(now);
-        Instant next = now.toInstant().plus(QuoteRefreshPolicy.retryDelay(postClose, 0));
+        Instant next = QuoteRefreshPolicy.nextAttemptAt(now, false);
         for (var item : quotes.entrySet()) {
             QuoteResult result = item.getValue();
             QuoteResult prior = latest.get(item.getKey());
@@ -125,6 +141,13 @@ class QuoteCacheRepository {
                     last_attempt_at, next_attempt_at, failure_count, post_close_attempts)
                 KEY (lookup_date, code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, values);
+    }
+
+    private static Entry readEntry(ResultSet row) throws SQLException {
+        OffsetDateTime next = row.getObject("next_attempt_at", OffsetDateTime.class);
+        OffsetDateTime last = row.getObject("last_attempt_at", OffsetDateTime.class);
+        return new Entry(readResult(row), row.getInt("failure_count"), row.getInt("post_close_attempts"),
+                next == null ? null : next.toInstant(), last == null ? null : last.toInstant());
     }
 
     private static QuoteResult readResult(ResultSet row) throws SQLException {

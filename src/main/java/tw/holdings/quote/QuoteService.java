@@ -3,8 +3,8 @@ package tw.holdings.quote;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
-import java.util.Optional;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -101,7 +101,7 @@ public class QuoteService {
         ZonedDateTime now = taipeiNow();
         if (QuoteRefreshPolicy.isPostClose(now)) {
             Set<Market> queuedMarkets = new HashSet<>();
-            cache.dueAfterClose(now.toLocalDate(), now.toInstant())
+            cache.dueAfterClose(now)
                     .stream().filter(due -> !isDelisted(markets.quoteListing(due.code(), now.toLocalDate()).orElse(null)))
                     .filter(due -> queuedMarkets.add(due.market()))
                     .forEach(due -> submit(due.code(), due.market(), false));
@@ -170,10 +170,12 @@ public class QuoteService {
 
         boolean failed = result.status() == QuoteResult.Status.UNAVAILABLE;
         int failures = failed ? (entry == null ? 1 : entry.failureCount() + 1) : 0;
-        int attempts = (entry == null ? 0 : entry.postCloseAttempts()) + (postClose ? 1 : 0);
-        var next = now.toInstant().plus(QuoteRefreshPolicy.retryDelay(postClose, failures));
+        ZonedDateTime completed = taipeiNow();
+        int attempts = (entry == null ? 0 : entry.postCloseAttempts())
+                + (QuoteRefreshPolicy.isPostClose(completed) ? 1 : 0);
+        var next = QuoteRefreshPolicy.nextAttemptAt(completed, failed);
         QuoteResult retained = keepLatest(result, last);
-        cache.save(day, code, new QuoteCacheRepository.Entry(retained, failures, attempts, next), now.toInstant());
+        cache.save(day, code, new QuoteCacheRepository.Entry(retained, failures, attempts, next, completed.toInstant()), completed.toInstant());
         return failed ? result : retained;
     }
 

@@ -8,20 +8,44 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.EnumMap;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import tw.holdings.quote.Market;
 
 @Component
 class OfficialQuoteRateLimit {
-    private static final Duration DEFAULT_PAUSE = Duration.ofMinutes(5);
+    private static final Duration FAILURE_PAUSE = Duration.ofMinutes(30);
     private final Map<Market, SourceGate> gates = new EnumMap<>(Market.class);
-    private final long intervalNanos;
+    private final LongSupplier nanoTime;
+    private final LongSupplier delayNanos;
+    private final Sleeper sleeper;
 
-    OfficialQuoteRateLimit(@Value("${quotes.min-request-interval:PT2S}") Duration interval) {
-        intervalNanos = interval.toNanos();
+    @FunctionalInterface
+    interface Sleeper {
+        void sleep(long nanos) throws InterruptedException;
+    }
+
+    @Autowired
+    OfficialQuoteRateLimit(@Value("${quotes.min-request-interval:PT30S}") Duration minimum,
+                           @Value("${quotes.max-request-interval:PT60S}") Duration maximum) {
+        this(minimum, maximum, System::nanoTime, TimeUnit.NANOSECONDS::sleep);
+    }
+
+    OfficialQuoteRateLimit(Duration minimum, Duration maximum, LongSupplier nanoTime, Sleeper sleeper) {
+        if (minimum.isNegative() || maximum.compareTo(minimum) < 0) {
+            throw new IllegalArgumentException("Invalid official request interval range");
+        }
+        long minimumNanos = minimum.toNanos();
+        long maximumNanos = maximum.toNanos();
+        this.delayNanos = minimumNanos == maximumNanos ? () -> minimumNanos
+                : () -> ThreadLocalRandom.current().nextLong(minimumNanos, maximumNanos);
+        this.nanoTime = nanoTime;
+        this.sleeper = sleeper;
         for (Market market : Market.values()) {
             gates.put(market, new SourceGate());
         }
@@ -32,39 +56,51 @@ class OfficialQuoteRateLimit {
     }
 
     final class SourceGate {
-        private long lastRequestNanos;
+        private long completedAtNanos;
+        private long delayAfterCompletion;
         private boolean requested;
         private Instant pausedUntil = Instant.MIN;
 
         void beforeRequest(Instant now) throws IOException, InterruptedException {
             if (now.isBefore(pausedUntil)) {
-                throw new IOException("Official source is rate-limited");
+                throw new IOException("Official source is cooling down");
             }
             if (requested) {
-                long remaining = intervalNanos - (System.nanoTime() - lastRequestNanos);
+                long remaining = delayAfterCompletion - (nanoTime.getAsLong() - completedAtNanos);
                 if (remaining > 0) {
-                    TimeUnit.NANOSECONDS.sleep(remaining);
+                    sleeper.sleep(remaining);
                 }
             }
-            lastRequestNanos = System.nanoTime();
+        }
+
+        void afterRequest() {
+            completedAtNanos = nanoTime.getAsLong();
+            delayAfterCompletion = delayNanos.getAsLong();
             requested = true;
         }
 
         void pause(Instant now, String retryAfter) {
-            if (!retryAfter.isBlank()) {
+            Instant minimumEnd = now.plus(FAILURE_PAUSE);
+            Instant headerEnd = retryAfterEnd(now, retryAfter);
+            Instant end = headerEnd.isAfter(minimumEnd) ? headerEnd : minimumEnd;
+            if (end.isAfter(pausedUntil)) {
+                pausedUntil = end;
+            }
+        }
+
+        private Instant retryAfterEnd(Instant now, String text) {
+            if (!text.isBlank()) {
                 try {
-                    pausedUntil = now.plusSeconds(Long.parseLong(retryAfter.strip()));
-                    return;
-                } catch (IllegalArgumentException | java.time.DateTimeException | ArithmeticException ignored) {
+                    return now.plusSeconds(Long.parseLong(text.strip()));
+                } catch (IllegalArgumentException | java.time.DateTimeException | ArithmeticException invalidSeconds) {
                     try {
-                        pausedUntil = ZonedDateTime.parse(retryAfter, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
-                        return;
+                        return ZonedDateTime.parse(text, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
                     } catch (DateTimeParseException malformed) {
-                        // 來源未提供有效的標頭，採用預設冷卻時間。
+                        // 無效或缺少的標頭使用來源冷卻下限。
                     }
                 }
             }
-            pausedUntil = now.plus(DEFAULT_PAUSE);
+            return now;
         }
     }
 }
