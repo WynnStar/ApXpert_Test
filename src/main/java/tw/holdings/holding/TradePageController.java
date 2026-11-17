@@ -87,9 +87,42 @@ class TradePageController {
         return "redirect:/v2/holdings";
     }
 
+    @GetMapping("/{id}/trades/{tradeId}/edit")
+    String editTrade(@PathVariable long id, @PathVariable long tradeId, Model model) {
+        var target = service.tradeTarget(id, tradeId);
+        model.addAttribute("tradeEdit", TradeEditForm.from(target.entry().trade()));
+        return showTradeEdit(target, model);
+    }
+
+    @PostMapping("/{id}/trades/{tradeId}/edit")
+    String updateTrade(@PathVariable long id, @PathVariable long tradeId,
+                       @ModelAttribute("tradeEdit") @Valid TradeEditForm form, BindingResult errors,
+                       Model model, RedirectAttributes redirect) {
+        if (!errors.hasErrors()) {
+            try {
+                service.editTrade(id, tradeId, form);
+                redirect.addFlashAttribute("notice", "已修改交易紀錄");
+                return "redirect:/v2/holdings/" + id;
+            } catch (HoldingApiController.ApiValidationException error) {
+                errors.reject("tradeEdit", error.getMessage());
+            } catch (HoldingVersionConflict error) {
+                errors.rejectValue("confirmV2", "confirmV2", "請先確認由 2.0 管理這檔持股");
+            } catch (InsufficientSharesException error) {
+                errors.reject("tradeEdit", "無法修改。修改後會發生超賣：" + error.getMessage());
+            }
+        }
+        return showTradeEdit(service.tradeTarget(id, tradeId), model);
+    }
+
+    private String showTradeEdit(TradeHoldingService.TradeTarget target, Model model) {
+        model.addAttribute("target", target);
+        model.addAttribute("maxTradeDate", service.today());
+        return "trades/edit-trade";
+    }
+
     @GetMapping("/{id}/trades/{tradeId}/delete")
     String confirmTradeDelete(@PathVariable long id, @PathVariable long tradeId, Model model) {
-        model.addAttribute("target", service.tradeDeleteTarget(id, tradeId));
+        model.addAttribute("target", service.tradeTarget(id, tradeId));
         return "trades/delete-trade";
     }
 

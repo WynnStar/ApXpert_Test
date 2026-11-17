@@ -70,6 +70,12 @@ public class TradeLedgerService {
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
+    public void updateTrade(long holdingId, TradeEntry original, Trade edited, String code) {
+        repository.updateTrade(holdingId, original, edited);
+        TradeLedger.replay(code, trades(holdingId));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
     public void removeTrade(long holdingId, long tradeId, String code) {
         repository.deleteTrade(holdingId, tradeId);
         // 若剩餘交易存在超賣，保留原始紀錄。

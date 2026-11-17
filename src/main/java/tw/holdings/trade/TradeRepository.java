@@ -2,6 +2,7 @@ package tw.holdings.trade;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -35,6 +36,20 @@ class TradeRepository {
                 SET sort_order = CASE WHEN id = ? THEN ? ELSE ? END
                 WHERE holding_id = ? AND id IN (?, ?)
                 """, first.id(), second.sortOrder(), first.sortOrder(), holdingId, first.id(), second.id());
+    }
+
+    void updateTrade(long holdingId, TradeEntry original, Trade edited) {
+        boolean sameDate = Objects.equals(original.trade().tradeDate(), edited.tradeDate());
+        jdbc.update("""
+                UPDATE holding_trades
+                SET trade_date = ?, shares = ?, unit_price = ?,
+                    sort_order = CASE WHEN ? THEN sort_order ELSE (
+                        SELECT COALESCE(MAX(entry.sort_order), 0) + 1 FROM holding_trades entry
+                        WHERE entry.holding_id = ? AND entry.trade_date = ?
+                    ) END
+                WHERE holding_id = ? AND id = ?
+                """, edited.tradeDate(), edited.shares(), edited.unitPrice(), sameDate,
+                holdingId, edited.tradeDate(), holdingId, original.id());
     }
 
     void deleteTrade(long holdingId, long tradeId) {

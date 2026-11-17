@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-Hant" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>修改交易｜持股記帳 2.0</title>
+</head>
+<body>
+<main th:with="holding=${target.holding}, entry=${target.entry}, side=${entry.trade.side.name()}, opening=${side == 'OPENING'}">
+    <h1 th:text="|修改 ${holding.code} ${holding.name ?: ''} 的交易|">修改交易</h1>
+    <p th:text="${opening ? '期初持股（由 1.0 帶入，無交易日期）' : (side == 'BUY' ? '買進' : '賣出')}"></p>
+    <form th:action="@{/v2/holdings/{id}/trades/{tradeId}/edit(id=${holding.id},tradeId=${entry.id})}"
+          th:object="${tradeEdit}" method="post">
+        <ul th:if="${#fields.hasAnyErrors()}" role="alert">
+            <li th:each="error : ${#fields.allErrors()}" th:text="${error}"></li>
+        </ul>
+        <p th:unless="${opening}"><label>交易日期
+            <input type="date" th:field="*{tradeDate}" th:max="${maxTradeDate}" required>
+        </label></p>
+        <p><label>股數 <input type="number" th:field="*{shares}" min="1" step="1" required></label></p>
+        <p><label>每股價格 <input type="number" th:field="*{unitPrice}" min="0.01" step="0.01" required></label></p>
+        <p th:unless="${target.v2Managed}">
+            <label><input type="checkbox" th:field="*{confirmV2}" required>
+                我同意將這檔持股交由 2.0 管理。儲存成功後，它將從 App 1.0 的清單與總計移除，後續請在 2.0 查詢與操作。
+            </label>
+        </p>
+        <a th:href="@{/v2/holdings/{id}(id=${holding.id})}">取消</a>
+        <button type="submit">儲存修改</button>
+    </form>
+</main>
+</body>
+</html>

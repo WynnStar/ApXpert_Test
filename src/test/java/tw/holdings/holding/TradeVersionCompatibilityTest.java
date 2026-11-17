@@ -533,6 +533,99 @@ class TradeVersionCompatibilityTest {
                 .andExpect(content().string(containsString("確認刪除此筆交易")));
     }
 
+    @Test
+    void editKeepsSameDayOrderAndMovesDatedTradesToTheEndOfTheirNewDay() throws Exception {
+        var created = mvc.perform(post(V2).contentType(MediaType.APPLICATION_JSON).content("""
+                {"code":"2330","trade_date":"2026-11-15","shares":200,"unit_price":10}
+                """)).andExpect(status().isCreated()).andReturn();
+        long id = json.readTree(created.getResponse().getContentAsByteArray()).get("id").longValue();
+        String api = V2 + "/" + id;
+        String detail = "/v2/holdings/" + id;
+        mvc.perform(post(api + "/trades").contentType(MediaType.APPLICATION_JSON).content("""
+                {"side":"BUY","trade_date":"2026-11-15","shares":100,"unit_price":20}
+                """)).andExpect(status().isCreated());
+        mvc.perform(post(api + "/trades").contentType(MediaType.APPLICATION_JSON).content("""
+                {"side":"SELL","trade_date":"2026-11-16","shares":100,"unit_price":30}
+                """)).andExpect(status().isCreated());
+
+        var buyIds = jdbc.queryForList(
+                "SELECT id FROM holding_trades WHERE holding_id = ? AND side = 'BUY' ORDER BY id", Long.class, id);
+        String first = detail + "/trades/" + buyIds.get(0) + "/edit";
+        String second = detail + "/trades/" + buyIds.get(1) + "/edit";
+        mvc.perform(get(detail)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("href=\"" + first + "\">修改")));
+        mvc.perform(get(first)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("name=\"tradeDate\" value=\"2026-11-15\"")))
+                .andExpect(content().string(containsString("name=\"shares\" value=\"200\"")))
+                .andExpect(content().string(containsString("name=\"unitPrice\" value=\"10.00\"")));
+        mvc.perform(post(first).param("tradeDate", "2026-11-15").param("shares", "200").param("unitPrice", "12"))
+                .andExpect(redirectedUrl(detail)).andExpect(flash().attribute("notice", "已修改交易紀錄"));
+        mvc.perform(get(api + "/trades")).andExpect(jsonPath("$[0].unit_price").value(12))
+                .andExpect(jsonPath("$[1].unit_price").value(20));
+
+        mvc.perform(post(second).param("tradeDate", "2026-11-16").param("shares", "100")
+                        .param("unitPrice", "20").param("side", "SELL"))
+                .andExpect(redirectedUrl(detail));
+        mvc.perform(get(api + "/trades")).andExpect(jsonPath("$[1].side").value("SELL"))
+                .andExpect(jsonPath("$[2].side").value("BUY"))
+                .andExpect(jsonPath("$[2].trade_date").value("2026-11-16"));
+        mvc.perform(get(api)).andExpect(jsonPath("$.shares").value(200))
+                .andExpect(jsonPath("$.remaining_cost").value(3230))
+                .andExpect(jsonPath("$.average_cost").value(16.15))
+                .andExpect(jsonPath("$.realized_pnl").value(1761))
+                .andExpect(jsonPath("$.unrealized_pnl").value(20664));
+
+        mvc.perform(post(first).param("tradeDate", "2026-11-15").param("shares", "99").param("unitPrice", "12"))
+                .andExpect(status().isOk()).andExpect(content().string(containsString(
+                        "2026-11-16 賣出 100 股，當時僅持有 99 股")));
+        String tomorrow = LocalDate.now(java.time.ZoneId.of("Asia/Taipei")).plusDays(1).toString();
+        mvc.perform(post(first).param("tradeDate", tomorrow).param("shares", "200").param("unitPrice", "12"))
+                .andExpect(status().isOk()).andExpect(content().string(containsString("交易日期不能晚於今天")));
+        mvc.perform(post(first).param("shares", "200").param("unitPrice", "12"))
+                .andExpect(status().isOk()).andExpect(content().string(containsString("請填寫交易日期")));
+        mvc.perform(get(api + "/trades")).andExpect(jsonPath("$[0].shares").value(200))
+                .andExpect(jsonPath("$[0].trade_date").value("2026-11-15"));
+    }
+
+    @Test
+    void editingLegacyOpeningOnlyConvertsAfterConfirmationAndSuccessfulValidation() throws Exception {
+        long id = createLegacy(OLD_BUY);
+        long openingId = jdbc.queryForObject("SELECT id FROM holding_trades WHERE holding_id = ?", Long.class, id);
+        String detail = "/v2/holdings/" + id;
+        String edit = detail + "/trades/" + openingId + "/edit";
+        mvc.perform(get(edit)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("由 1.0 帶入，無交易日期")))
+                .andExpect(content().string(containsString("我同意將這檔持股交由 2.0 管理")))
+                .andExpect(content().string(not(containsString("name=\"tradeDate\""))));
+        mvc.perform(post(edit).param("shares", "300").param("unitPrice", "140"))
+                .andExpect(status().isOk()).andExpect(content().string(containsString("請先確認由 2.0 管理")));
+        mvc.perform(post(edit).param("shares", "0").param("unitPrice", "140").param("confirmV2", "true"))
+                .andExpect(status().isOk()).andExpect(content().string(containsString("股數必須大於 0")));
+        mvc.perform(post(edit).param("shares", "300").param("unitPrice", "140.001").param("confirmV2", "true"))
+                .andExpect(status().isOk()).andExpect(content().string(containsString("每股價格最多兩位小數")));
+        mvc.perform(post(edit).param("tradeDate", "2026-11-16").param("shares", "300")
+                        .param("unitPrice", "140").param("confirmV2", "true"))
+                .andExpect(status().isOk()).andExpect(content().string(containsString("期初持股無交易日期")));
+        mvc.perform(get(V1 + "/" + id)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lots").value(2)).andExpect(jsonPath("$.buy_price").value(150));
+        mvc.perform(get(V2 + "/" + id)).andExpect(jsonPath("$.v2_managed").value(false));
+
+        mvc.perform(post(edit).param("shares", "300").param("unitPrice", "140").param("confirmV2", "true"))
+                .andExpect(redirectedUrl(detail));
+        mvc.perform(get(V1)).andExpect(jsonPath("$.length()").value(0));
+        mvc.perform(get("/api/v1/summary")).andExpect(jsonPath("$.total_cost").value(0));
+        mvc.perform(get(V2 + "/" + id)).andExpect(jsonPath("$.v2_managed").value(true));
+        mvc.perform(get(V2 + "/" + id + "/trades")).andExpect(jsonPath("$[0].side").value("OPENING"))
+                .andExpect(jsonPath("$[0].trade_date").value(nullValue()))
+                .andExpect(jsonPath("$[0].shares").value(300))
+                .andExpect(jsonPath("$[0].unit_price").value(140));
+
+        mvc.perform(get(edit)).andExpect(status().isOk())
+                .andExpect(content().string(not(containsString("我同意將這檔持股交由 2.0 管理"))));
+        mvc.perform(post(edit).param("shares", "450").param("unitPrice", "141")).andExpect(redirectedUrl(detail));
+        mvc.perform(get(V2 + "/" + id)).andExpect(jsonPath("$.shares").value(450));
+    }
+
     private String tradeDeletePage(long holdingId, String side) {
         long tradeId = jdbc.queryForObject("SELECT id FROM holding_trades WHERE holding_id = ? AND side = ?",
                 Long.class, holdingId, side);
