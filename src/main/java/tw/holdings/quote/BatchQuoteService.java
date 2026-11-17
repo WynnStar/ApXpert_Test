@@ -55,7 +55,7 @@ class BatchQuoteService {
             LocalDate day = now.toLocalDate();
             if (!day.equals(refresh.day)) {
                 refresh.day = day;
-                refresh.entry = null;
+                refresh.entry = cache.lastMarketAttempt(day, market).orElse(null);
             }
             if (QuoteRefreshPolicy.canRefresh(now, refresh.entry)) {
                 refresh(market, refresh, now);
@@ -66,27 +66,32 @@ class BatchQuoteService {
     }
 
     private void refresh(Market market, MarketRefresh refresh, ZonedDateTime now) {
-        int attempts = (refresh.entry == null ? 0 : refresh.entry.postCloseAttempts())
-                + (QuoteRefreshPolicy.isPostClose(now) ? 1 : 0);
         try {
             var snapshot = official.fetch(market, now.toLocalDate());
-            var next = now.toInstant().plus(QuoteRefreshPolicy.retryDelay(QuoteRefreshPolicy.isPostClose(now), 0));
-            transactions.executeWithoutResult(status -> cache.saveBatch(now, snapshot.quotes()));
+            var completed = clock.instant().atZone(QuoteRefreshPolicy.TAIPEI);
+            int attempts = (refresh.entry == null ? 0 : refresh.entry.postCloseAttempts())
+                    + (QuoteRefreshPolicy.isPostClose(completed) ? 1 : 0);
+            var next = QuoteRefreshPolicy.nextAttemptAt(completed, false);
+            transactions.executeWithoutResult(status -> cache.saveBatch(completed, snapshot.quotes()));
             refresh.entry = new QuoteCacheRepository.Entry(
-                    QuoteResult.found(null, market, null, snapshot.priceDate()), 0, attempts, next);
+                    QuoteResult.found(null, market, null, snapshot.priceDate()), 0, attempts, next, completed.toInstant());
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            rememberFailure(refresh, now, attempts);
+            rememberFailure(market, refresh);
         } catch (IOException exception) {
             LOGGER.warn("Official batch unavailable: market={}, reason={}", market, exception.getClass().getSimpleName());
-            rememberFailure(refresh, now, attempts);
+            rememberFailure(market, refresh);
         }
     }
 
-    private void rememberFailure(MarketRefresh refresh, ZonedDateTime now, int attempts) {
+    private void rememberFailure(Market market, MarketRefresh refresh) {
+        var now = clock.instant().atZone(QuoteRefreshPolicy.TAIPEI);
         int failures = refresh.entry == null ? 1 : refresh.entry.failureCount() + 1;
-        var next = now.toInstant().plus(QuoteRefreshPolicy.retryDelay(QuoteRefreshPolicy.isPostClose(now), failures));
-        refresh.entry = new QuoteCacheRepository.Entry(QuoteResult.unavailable(), failures, attempts, next);
+        int attempts = (refresh.entry == null ? 0 : refresh.entry.postCloseAttempts())
+                + (QuoteRefreshPolicy.isPostClose(now) ? 1 : 0);
+        var next = QuoteRefreshPolicy.nextAttemptAt(now, true);
+        transactions.executeWithoutResult(status -> cache.markBatchFailure(now, market));
+        refresh.entry = new QuoteCacheRepository.Entry(QuoteResult.unavailable(), failures, attempts, next, now.toInstant());
     }
 
     private static final class MarketRefresh {

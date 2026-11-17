@@ -19,7 +19,6 @@ class OfficialQuoteHttp {
             .connectTimeout(Duration.ofSeconds(3))
             .build();
     private final ObjectMapper mapper;
-
     private final OfficialQuoteRateLimit rateLimit;
     private final Clock clock;
 
@@ -43,22 +42,27 @@ class OfficialQuoteHttp {
                 .timeout(Duration.ofSeconds(4))
                 .GET()
                 .build();
-        HttpResponse<String> response;
         var gate = rateLimit.gate(market);
         synchronized (gate) {
             gate.beforeRequest(clock.instant());
-            response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 429) {
-                gate.pause(clock.instant(), response.headers().firstValue("Retry-After").orElse(""));
+            String retryAfter = "";
+            try {
+                var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                retryAfter = response.headers().firstValue("Retry-After").orElse("");
+                if (response.statusCode() != 200) {
+                    throw new IOException("HTTP " + response.statusCode());
+                }
+                JsonNode payload = mapper.readTree(response.body());
+                if (payload == null) {
+                    throw new IOException("Empty official response");
+                }
+                return payload;
+            } catch (IOException exception) {
+                gate.pause(clock.instant(), retryAfter);
+                throw exception;
+            } finally {
+                gate.afterRequest();
             }
         }
-        if (response.statusCode() != 200) {
-            throw new IOException("HTTP " + response.statusCode());
-        }
-        JsonNode payload = mapper.readTree(response.body());
-        if (payload == null) {
-            throw new IOException("Empty official response");
-        }
-        return payload;
     }
 }
