@@ -6,9 +6,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import tw.holdings.quote.marketstatus.MarketStatusService;
 import tw.holdings.quote.QuoteResult;
 import tw.holdings.quote.QuoteService;
+import tw.holdings.quote.marketstatus.MarketStatusService;
 
 @RestController
 class StockLookupController {
@@ -22,7 +22,7 @@ class StockLookupController {
 
     @GetMapping("/holdings/stock-lookup")
     ResponseEntity<Map<String, String>> lookup(@RequestParam String code) {
-        if (!code.matches(CreateHoldingForm.CODE_PATTERN)) {
+        if (!code.matches(StockCode.PATTERN)) {
             return ResponseEntity.badRequest().body(Map.of("message", "股票代號格式錯誤"));
         }
         var delisting = markets.delisting(code);
