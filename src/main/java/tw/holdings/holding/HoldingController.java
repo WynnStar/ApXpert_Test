@@ -93,7 +93,9 @@ class HoldingController {
     }
 
     private String showList(Model model) {
-        model.addAttribute("holdings", service.list());
+        HoldingPortfolio portfolio = service.portfolio();
+        model.addAttribute("holdings", portfolio.holdings());
+        model.addAttribute("summary", portfolio.summary());
         return "holdings/list";
     }
 }
