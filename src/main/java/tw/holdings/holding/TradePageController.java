@@ -25,11 +25,13 @@ import tw.holdings.trade.TradeOrderException;
 @Controller
 @RequestMapping("/v2/holdings")
 class TradePageController {
-    private final TradeHoldingService service;
+    private final TradeHoldingService commands;
+    private final TradeHoldingQueryService queries;
     private final TradeDateRules dates;
 
-    TradePageController(TradeHoldingService service, TradeDateRules dates) {
-        this.service = service;
+    TradePageController(TradeHoldingService commands, TradeHoldingQueryService queries, TradeDateRules dates) {
+        this.commands = commands;
+        this.queries = queries;
         this.dates = dates;
     }
 
@@ -58,7 +60,7 @@ class TradePageController {
             return showList(model);
         }
         try {
-            long id = service.create(form.stockCode(), form.firstBuy());
+            long id = commands.create(form.stockCode(), form.firstBuy());
             redirect.addFlashAttribute("notice", "已記錄買進");
             return "redirect:/v2/holdings/" + id;
         } catch (HoldingApiController.ApiValidationException | DuplicateHoldingException | StockLookupException error) {
@@ -74,7 +76,7 @@ class TradePageController {
             return showDetail(id, model);
         }
         try {
-            service.append(id, form.trade(), form.confirmed());
+            commands.append(id, form.trade(), form.confirmed());
             redirect.addFlashAttribute("notice", "已記錄交易");
             return "redirect:/v2/holdings/" + id;
         } catch (HoldingApiController.ApiValidationException | HoldingVersionConflict | InsufficientSharesException error) {
@@ -85,20 +87,20 @@ class TradePageController {
 
     @GetMapping("/{id}/delete")
     String confirmDelete(@PathVariable long id, Model model) {
-        model.addAttribute("holding", service.deleteTarget(id));
+        model.addAttribute("holding", queries.deleteTarget(id));
         return "trades/delete";
     }
 
     @PostMapping("/{id}/delete")
     String delete(@PathVariable long id, RedirectAttributes redirect) {
-        service.delete(id);
+        commands.delete(id);
         redirect.addFlashAttribute("notice", "已刪除整檔持股及交易紀錄");
         return "redirect:/v2/holdings";
     }
 
     @GetMapping("/{id}/trades/{tradeId}/edit")
     String editTrade(@PathVariable long id, @PathVariable long tradeId, Model model) {
-        var target = service.tradeTarget(id, tradeId);
+        var target = queries.tradeTarget(id, tradeId);
         model.addAttribute("tradeEdit", TradeEditForm.from(target.entry().trade()));
         return showTradeEdit(target, model);
     }
@@ -109,7 +111,7 @@ class TradePageController {
                        Model model, RedirectAttributes redirect) {
         if (!errors.hasErrors()) {
             try {
-                service.editTrade(id, tradeId, form);
+                commands.editTrade(id, tradeId, form);
                 redirect.addFlashAttribute("notice", "已修改交易紀錄");
                 return "redirect:/v2/holdings/" + id;
             } catch (HoldingApiController.ApiValidationException error) {
@@ -120,10 +122,10 @@ class TradePageController {
                 errors.reject("tradeEdit", "無法修改。修改後會發生超賣：" + error.getMessage());
             }
         }
-        return showTradeEdit(service.tradeTarget(id, tradeId), model);
+        return showTradeEdit(queries.tradeTarget(id, tradeId), model);
     }
 
-    private String showTradeEdit(TradeHoldingService.TradeTarget target, Model model) {
+    private String showTradeEdit(TradeHoldingQueryService.TradeTarget target, Model model) {
         model.addAttribute("target", target);
         var range = dates.range(target.holding().code());
         addDateRange(range, model);
@@ -135,7 +137,7 @@ class TradePageController {
 
     @GetMapping("/{id}/trades/{tradeId}/delete")
     String confirmTradeDelete(@PathVariable long id, @PathVariable long tradeId, Model model) {
-        model.addAttribute("target", service.tradeTarget(id, tradeId));
+        model.addAttribute("target", queries.tradeTarget(id, tradeId));
         return "trades/delete-trade";
     }
 
@@ -144,7 +146,7 @@ class TradePageController {
                        RedirectAttributes redirect) {
         String detail = "redirect:/v2/holdings/" + id;
         try {
-            return switch (service.deleteTrade(id, tradeId, lastTrade)) {
+            return switch (commands.deleteTrade(id, tradeId, lastTrade)) {
                 case TRADE_DELETED -> {
                     redirect.addFlashAttribute("notice", "已刪除交易紀錄");
                     yield detail;
@@ -168,7 +170,7 @@ class TradePageController {
     String move(@PathVariable long id, @PathVariable long tradeId, @RequestParam Direction direction,
                 RedirectAttributes redirect) {
         try {
-            service.move(id, tradeId, direction);
+            commands.move(id, tradeId, direction);
             redirect.addFlashAttribute("notice", "已調整同日交易順序");
         } catch (TradeOrderException error) {
             redirect.addFlashAttribute("orderError", error.getMessage());
@@ -191,7 +193,7 @@ class TradePageController {
     }
 
     private String showList(Model model) {
-        var holdings = service.list();
+        var holdings = queries.list();
         model.addAttribute("holdings", holdings);
         TradeInput form = (TradeInput) model.asMap().get("trade");
         addDateRange(dates.range(form.code()), model);
@@ -200,7 +202,7 @@ class TradePageController {
     }
 
     private String showDetail(long id, Model model) {
-        var history = service.history(id);
+        var history = queries.history(id);
         model.addAttribute("history", history);
         addDateRange(dates.range(history.holding().code()), model);
         return "trades/detail";
