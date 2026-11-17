@@ -3,8 +3,11 @@ package tw.holdings.holding.v2;
 import java.math.BigDecimal;
 import java.util.List;
 
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import tw.holdings.profit.ProfitCalculator;
 
+@JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 record TradePortfolioSummary(BigDecimal remainingCost, BigDecimal marketValue, BigDecimal unrealizedPnl,
                              BigDecimal unrealizedReturnPct, BigDecimal realizedPnl, BigDecimal realizedReturnPct,
                              int quoteMissing, BigDecimal delistedCost) {

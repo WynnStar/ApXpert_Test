@@ -413,7 +413,7 @@ class TradeVersionCompatibilityTest {
                 .andExpect(jsonPath("$[1].side").value("SELL"))
                 .andExpect(jsonPath("$[2].unit_price").value(20))
                 .andExpect(jsonPath("$[3].unit_price").value(40))
-                .andExpect(jsonPath("$[1].id").doesNotExist())
+                .andExpect(jsonPath("$[1].id").value(sellId))
                 .andExpect(jsonPath("$[1].can_move_up").doesNotExist());
         mvc.perform(get(api)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.shares").value(200))

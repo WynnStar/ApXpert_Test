@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import tw.holdings.holding.error.DuplicateHoldingException;
 import tw.holdings.holding.error.HoldingNotFoundException;
+import tw.holdings.holding.error.HoldingTradeNotFoundException;
 import tw.holdings.holding.error.HoldingValidationException;
 import tw.holdings.holding.error.HoldingVersionConflict;
 import tw.holdings.holding.error.StockLookupException;

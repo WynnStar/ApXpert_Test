@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import tw.holdings.holding.error.DuplicateHoldingException;
 import tw.holdings.holding.error.HoldingNotFoundException;
+import tw.holdings.holding.error.HoldingTradeNotFoundException;
 import tw.holdings.holding.error.HoldingValidationException;
 import tw.holdings.holding.error.HoldingVersionConflict;
 import tw.holdings.holding.error.StockIdentityUnavailableException;
@@ -30,8 +31,8 @@ class HoldingApiErrors {
                 "請使用 JSON，且欄位必須符合指定型別");
     }
 
-    @ExceptionHandler(HoldingNotFoundException.class)
-    ResponseEntity<ApiErrorResponse> notFound(HoldingNotFoundException exception) {
+    @ExceptionHandler({HoldingNotFoundException.class, HoldingTradeNotFoundException.class})
+    ResponseEntity<ApiErrorResponse> notFound(RuntimeException exception) {
         return respond(HttpStatus.NOT_FOUND, "NOT_FOUND", exception.getMessage());
     }
 

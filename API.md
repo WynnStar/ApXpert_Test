@@ -171,6 +171,9 @@ async function requestApi(path, { method = 'GET', body } = {}) {
   }
 
   const response = await fetch(BASE_URL + path, options);
+  if (response.status === 204) {
+    return null;
+  }
   const payload = await response.json();
   if (!response.ok) {
     const error = new Error(payload.error?.message ?? '無法完成請求');
@@ -223,8 +226,11 @@ async function runExample() {
 | GET | /api/v2/holdings/{id}/trades | 200 | 交易物件陣列 |
 | POST | /api/v2/holdings | 201 | 建立持股及第一筆買進後的持股物件 |
 | POST | /api/v2/holdings/{id}/trades | 201 | 新增交易後的持股物件 |
+| GET | /api/v2/summary | 200 | 全部持股的總計物件 |
+| PUT | /api/v2/holdings/{id}/trades/{tradeId} | 200 | 修改交易後的持股物件 |
+| DELETE | /api/v2/holdings/{id} | 204 | 空回應，刪除整檔持股及其全部交易 |
 
-id 是伺服器產生的 64 位元整數。現有 API 沒有分頁、v2 總計路由、修改、刪除或排序路由。這些維護操作及總計可在 /v2/holdings 網頁使用。交易 JSON 目前沒有交易 id，App 無法據此發出單筆交易維護請求。
+持股 id 與交易 id 都是伺服器產生的 64 位元整數。App 2.0 已提供持股新增、清單、單檔查詢、交易修改、整檔刪除與總計，涵蓋 1.0 的操作能力。2.0 以修改單筆交易調整股數與成本，修改路徑需同時帶持股 id 和該檔的交易 id。單筆交易刪除、排序目前透過 /v2/holdings 網頁操作，API 尚未提供。清單與交易紀錄目前沒有分頁。
 
 ### 4.2 POST 欄位
 
@@ -257,6 +263,8 @@ shares 使用 Java long，單次最多 9223372036854775807 股，累計仍不得
   "average_cost": 155.2200,
   "realized_pnl": 1437.00,
   "unrealized_pnl": 7184.00,
+  "realized_return_pct": 9.26,
+  "unrealized_return_pct": 9.26,
   "current_price": 170.00,
   "price_date": "2026-11-18"
 }
@@ -274,39 +282,127 @@ shares 使用 Java long，單次最多 9223372036854775807 股，累計仍不得
 | average_cost | 數字或 null | remaining_cost ÷ shares，四捨五入到四位小數；零股數時為 null |
 | realized_pnl | 數字 | 已實現損益加總，保留兩位小數，尚未賣出為 0 |
 | unrealized_pnl | 數字或 null | 剩餘持股依收盤價一次全賣的預估淨損益；缺行情為 null，零股數為 0 |
+| realized_return_pct | 數字或 null | 已實現損益 ÷ 累計分攤成本 × 100，四捨五入到兩位；尚未賣出為 null |
+| unrealized_return_pct | 數字或 null | 未實現損益 ÷ 剩餘成本 × 100，四捨五入到兩位；缺價或剩餘成本為 0 時為 null |
 | current_price | 數字或 null | 快取中的最近已知官方收盤價 |
 | price_date | 字串或 null | 收盤價實際交易日；缺行情時為 null |
 
 average_cost 的四位小數是目前 API 精度，網頁另顯示到兩位。請直接使用 remaining_cost 核算成本。
 
-realized_return_pct、unrealized_return_pct、realized_cost 及下市狀態目前沒有輸出為 JSON 欄位。App 可顯示現有損益金額，網頁顯示的損益率與下市標示要開放給 App 時須另行擴充契約。未實現損益率可由 unrealized_pnl ÷ remaining_cost × 100 計算至兩位，分母為 0 或損益為 null 時顯示空值。已實現損益率需要分攤成本，目前 JSON 未提供。
+App 直接使用伺服器回傳的兩種損益率。realized_cost 及下市狀態目前沒有輸出為個股 JSON 欄位；總計另提供 delisted_cost，供顯示已下市櫃且尚未售出的成本。
 
 ### 4.4 交易物件
 
 ~~~json
 [
-  { "side": "BUY", "trade_date": "2026-11-18", "shares": 300, "unit_price": 150.00 },
-  { "side": "BUY", "trade_date": "2026-11-18", "shares": 300, "unit_price": 160.00 },
-  { "side": "SELL", "trade_date": "2026-11-18", "shares": 100, "unit_price": 170.00 }
+  { "id": 1, "side": "BUY", "trade_date": "2026-11-18", "shares": 300, "unit_price": 150.00 },
+  { "id": 2, "side": "BUY", "trade_date": "2026-11-18", "shares": 300, "unit_price": 160.00 },
+  { "id": 3, "side": "SELL", "trade_date": "2026-11-18", "shares": 100, "unit_price": 170.00 }
 ]
 ~~~
 
 | 欄位 | 型別 | 意義 |
 | --- | --- | --- |
+| id | 整數 | 該筆交易的識別值，供修改 API 使用 |
 | side | 字串 | OPENING、BUY 或 SELL |
 | trade_date | 字串或 null | 交易日期，OPENING 為 null |
 | shares | 整數 | 該筆股數 |
 | unit_price | 數字 | 該筆每股價格，最多兩位小數 |
 
-App 保留回傳順序，同日可能有內容相同的多筆真實交易。交易 id 和網頁上下移按鈕的狀態沒有輸出。
+App 保留回傳順序，同日可能有內容相同的多筆真實交易。修改時使用各筆 id；id 範例值需換成實際回傳值。網頁上下移按鈕的狀態沒有輸出。
 
 1.0 的 2 張、每股 150 元帶入後，期初紀錄如下。既有資料沒有買進日期，因此日期為 null。
 
 ~~~json
 [
-  { "side": "OPENING", "trade_date": null, "shares": 2000, "unit_price": 150.00 }
+  { "id": 4, "side": "OPENING", "trade_date": null, "shares": 2000, "unit_price": 150.00 }
 ]
 ~~~
+
+### 4.5 查詢總計
+
+~~~bash
+curl -i "$BASE_URL/api/v2/summary"
+~~~
+
+成功為 HTTP 200，計算範圍包含未轉版的 1.0 持股及 2.0 持股。若只執行第 2 節的三筆交易，且收盤價固定為 170 元，範例如下。
+
+~~~json
+{
+  "remaining_cost": 77610.00,
+  "market_value": 85000.00,
+  "unrealized_pnl": 7184.00,
+  "unrealized_return_pct": 9.26,
+  "realized_pnl": 1437.00,
+  "realized_return_pct": 9.26,
+  "quote_missing": 0,
+  "delisted_cost": 0
+}
+~~~
+
+| 欄位 | 型別 | 意義 |
+| --- | --- | --- |
+| remaining_cost | 數字 | 全部剩餘成本加總，含買進手續費，也包含缺行情及下市櫃持股 |
+| market_value | 數字 | 有行情且未下市櫃的剩餘市值加總，不扣賣出費稅 |
+| unrealized_pnl | 數字 | 有行情且未下市櫃的未實現損益加總 |
+| unrealized_return_pct | 數字或 null | 總未實現損益 ÷ 全部剩餘成本 × 100，四捨五入至兩位；分母為 0 時為 null |
+| realized_pnl | 數字 | 全部已實現損益加總，含已賣清持股 |
+| realized_return_pct | 數字或 null | 總已實現損益 ÷ 全部已分攤成本 × 100，四捨五入至兩位；分母為 0 時為 null |
+| quote_missing | 整數 | 尚有股數、未下市櫃且缺少收盤價的持股筆數 |
+| delisted_cost | 數字 | 已下市櫃且尚有股數的剩餘成本加總 |
+
+缺行情及下市櫃的剩餘成本保留在分母，市值及未實現損益排除，畫面應搭配 quote_missing 和 delisted_cost 呈現。空清單的各金額為 0，兩種損益率為 null。總收益率依總損益與總成本計算，不能將個股損益率直接平均。
+
+### 4.6 修改一筆交易
+
+先 GET /api/v2/holdings/{id}/trades，從回應選出要更正的交易 id。以下示範修改第一筆 BUY，TRADE_ID 請填實際值。進行本段前先完成第 2 節驗收，修改後的數字會跟著重算。
+
+~~~bash
+TRADE_ID=1
+curl -i -X PUT "$BASE_URL/api/v2/holdings/$HOLDING_ID/trades/$TRADE_ID" \
+  -H 'Content-Type: application/json' \
+  --data "{\"trade_date\":\"$TRADE_DATE\",\"shares\":300,\"unit_price\":149.5}"
+~~~
+
+成功為 HTTP 200，回傳重新計算後的持股物件，交易 id 保留。
+
+| 請求欄位 | 型別 | 規則 |
+| --- | --- | --- |
+| trade_date | 字串或 null | BUY、SELL 必填，依既有交易日期限制驗證；OPENING 省略或填 null |
+| shares | 整數 | 必填，大於 0，符合 long 範圍 |
+| unit_price | 數字 | 必填，大於 0，最多兩位小數及 36 位整數 |
+| confirm_v2 | 布林 | 修改未轉版持股時須經使用者同意後填 true |
+
+路徑選定持股與交易，股票代號及交易方向由原交易決定。PUT 會替換日期、股數及每股價格，重新回放後續交易。若造成歷史超賣則回 409 INSUFFICIENT_SHARES 並回滾。交易不存在或屬於另一檔持股回 404 NOT_FOUND。
+
+舊於五年的交易可以更正股數與價格，日期必須維持原值。其他日期依目前五年、首次上市櫃日和未來日期限制驗證。OPENING 修改時日期必須為 null。未轉版的期初交易會先回 409 CONFIRM_V2_REQUIRED，確認後才轉由 2.0 管理。
+
+~~~javascript
+const updated = await requestApi(
+  '/api/v2/holdings/' + holdingId + '/trades/' + tradeId,
+  { method: 'PUT', body: { trade_date: selectedDate, shares: 300, unit_price: 149.5 } }
+);
+~~~
+
+holdingId、tradeId、selectedDate 由 App 的持股、交易選擇與日期欄位取得。
+
+### 4.7 刪除整檔持股
+
+App 先顯示確認訊息「刪除整檔持股會一併移除所有交易和已實現損益紀錄」，使用者確認後才發 DELETE。
+
+~~~bash
+curl -i -X DELETE "$BASE_URL/api/v2/holdings/$HOLDING_ID"
+~~~
+
+成功回 HTTP 204，body 為空。第 3 節 requestApi() 對 204 直接回 null，不再呼叫 response.json()。
+
+~~~javascript
+await requestApi('/api/v2/holdings/' + holdingId, { method: 'DELETE' });
+const holdings = await requestApi('/api/v2/holdings');
+const summary = await requestApi('/api/v2/summary');
+~~~
+
+此請求同時刪除期初持股、全部買賣與該檔已實現損益。成功後重新載入清單與總計。尚未轉版的 1.0 持股也能從此 API 刪除，兩版都會反映。持股不存在或已刪除回 404 NOT_FOUND。交易與持股刪除在同一筆資料庫交易內完成。
 
 ## 5. 費用、成本及缺行情處理
 
@@ -341,6 +437,12 @@ curl -i -X POST "$BASE_URL/api/v2/holdings/$HOLDING_ID/trades" \
   --data "{\"side\":\"BUY\",\"trade_date\":\"$TRADE_DATE\",\"shares\":300,\"unit_price\":160,\"confirm_v2\":true}"
 ~~~
 
+### 1.0 的 409 與 503 決策
+
+沿用逐檔確認轉版的方案。409 HOLDING_REQUIRES_V2 表示該持股已不符合舊版張數模型，503 QUOTE_UNAVAILABLE 表示暫時無法確認身分。兩者的錯誤 body 都維持原有 error.code、error.message 格式。
+
+這些 HTTP 狀態與錯誤碼超出 App 1.0 原題列出的部分清單，屬於相容設計的取捨，不能視為完全符合原清單。伺服器使用 409 避免舊版覆寫新版帳本，使用 503 區分暫時失敗與確定查無代號。原 App 會依既有錯誤呈現機制顯示訊息。未轉版持股的原 v1 操作、欄位與成功狀態繼續沿用。
+
 舊 App 不會主動收到通知。新版網頁刪除整檔持股會移除共用資料，1.0 和 2.0 都會反映刪除結果。其他未轉版持股仍能由 1.0 操作。
 
 ## 7. 錯誤與重試
@@ -359,7 +461,7 @@ App 先依 HTTP 狀態和 error.code 決定流程，再顯示 error.message。�
 | HTTP | error.code | 情境及處理 |
 | --- | --- | --- |
 | 400 | VALIDATION_ERROR | 缺欄位、非法數值、JSON 型別或日期不符，修正輸入 |
-| 404 | NOT_FOUND | 持股不存在、id 非合法整數或 API 路徑不存在 |
+| 404 | NOT_FOUND | 持股或交易不存在、交易不屬於該持股、id 非合法整數或 API 路徑不存在 |
 | 404 | STOCK_NOT_FOUND | 新建時上市、上櫃都查不到代號 |
 | 409 | DUPLICATE_CODE | 同代號已存在，取得既有 id 追加交易 |
 | 409 | CONFIRM_V2_REQUIRED | 舊持股尚未確認由 2.0 管理 |
@@ -391,6 +493,9 @@ App 先依 HTTP 狀態和 error.code 決定流程，再顯示 error.message。�
 - [ ] 可呈現 OPENING 的 null 日期與從張換算的股數。
 - [ ] 取得使用者確認才送 confirm_v2=true，失敗交易沒有轉版。
 - [ ] 未轉版持股仍能由 1.0 操作，已轉版持股移出舊清單與總計。
+- [ ] 正確顯示個股與總計的已實現、未實現損益率及 null。
+- [ ] 依交易 id 修改，原 id 保留，超賣修改回滾。
+- [ ] 整檔刪除的 204 空回應可正確處理，清單與總計重新載入。
 - [ ] 正確處理金額精度和實際 JSON 欄位。
 - [ ] POST 逾時先確認伺服器狀態，再決定是否重送。
 
