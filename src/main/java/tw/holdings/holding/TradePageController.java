@@ -63,7 +63,7 @@ class TradePageController {
             long id = commands.create(form.stockCode(), form.firstBuy());
             redirect.addFlashAttribute("notice", "已記錄買進");
             return "redirect:/v2/holdings/" + id;
-        } catch (HoldingApiController.ApiValidationException | DuplicateHoldingException | StockLookupException error) {
+        } catch (HoldingValidationException | DuplicateHoldingException | StockLookupException error) {
             errors.reject("trade", error.getMessage());
             return showList(model);
         }
@@ -79,7 +79,7 @@ class TradePageController {
             commands.append(id, form.trade(), form.confirmed());
             redirect.addFlashAttribute("notice", "已記錄交易");
             return "redirect:/v2/holdings/" + id;
-        } catch (HoldingApiController.ApiValidationException | HoldingVersionConflict | InsufficientSharesException error) {
+        } catch (HoldingValidationException | HoldingVersionConflict | InsufficientSharesException error) {
             errors.reject("trade", error.getMessage());
             return showDetail(id, model);
         }
@@ -114,7 +114,7 @@ class TradePageController {
                 commands.editTrade(id, tradeId, form);
                 redirect.addFlashAttribute("notice", "已修改交易紀錄");
                 return "redirect:/v2/holdings/" + id;
-            } catch (HoldingApiController.ApiValidationException error) {
+            } catch (HoldingValidationException error) {
                 errors.reject("tradeEdit", error.getMessage());
             } catch (HoldingVersionConflict error) {
                 errors.rejectValue("confirmV2", "confirmV2", "請先確認由 2.0 管理這檔持股");

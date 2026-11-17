@@ -13,8 +13,8 @@ import tw.holdings.trade.InsufficientSharesException;
 @RestControllerAdvice(assignableTypes = {HoldingApiController.class, TradeApiController.class})
 class HoldingApiErrors {
 
-    @ExceptionHandler(HoldingApiController.ApiValidationException.class)
-    ResponseEntity<ApiErrorResponse> validation(HoldingApiController.ApiValidationException exception) {
+    @ExceptionHandler(HoldingValidationException.class)
+    ResponseEntity<ApiErrorResponse> validation(HoldingValidationException exception) {
         return respond(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", exception.getMessage());
     }
 

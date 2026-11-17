@@ -87,7 +87,7 @@ class TradeHoldingService {
             }
             throw exception;
         } catch (ArithmeticException exception) {
-            throw new HoldingApiController.ApiValidationException("新增後的累計股數超過可儲存的範圍");
+            throw new HoldingValidationException("新增後的累計股數超過可儲存的範圍");
         }
     }
 
@@ -114,7 +114,7 @@ class TradeHoldingService {
         try {
             ledger.updateTrade(id, original, edited, holding.code());
         } catch (ArithmeticException error) {
-            throw new HoldingApiController.ApiValidationException("修改後的累計股數超過可儲存的範圍");
+            throw new HoldingValidationException("修改後的累計股數超過可儲存的範圍");
         }
     }
 
@@ -162,7 +162,7 @@ class TradeHoldingService {
     private void validateBuy(String code, Trade trade) {
         if (trade.side() == Trade.Side.BUY) {
             markets.buyRestriction(code, trade.tradeDate()).ifPresent(message -> {
-                throw new HoldingApiController.ApiValidationException(message);
+                throw new HoldingValidationException(message);
             });
         }
     }

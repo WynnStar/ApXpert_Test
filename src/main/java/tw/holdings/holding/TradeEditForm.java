@@ -22,10 +22,10 @@ record TradeEditForm(@DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate tr
 
     Trade applyTo(Trade.Side side) {
         if (side == Trade.Side.OPENING && tradeDate != null) {
-            throw new HoldingApiController.ApiValidationException("期初持股無交易日期");
+            throw new HoldingValidationException("期初持股無交易日期");
         }
         if (side != Trade.Side.OPENING && tradeDate == null) {
-            throw new HoldingApiController.ApiValidationException("請填寫交易日期");
+            throw new HoldingValidationException("請填寫交易日期");
         }
         return new Trade(side, tradeDate, shares, unitPrice);
     }

@@ -50,7 +50,7 @@ class HoldingApiController {
     @PutMapping("/holdings/{id}")
     HoldingApiResponse update(@PathVariable long id, @RequestBody HoldingApiRequest request) {
         if (request.code() != null) {
-            throw new ApiValidationException("修改持股時不能變更股票代號");
+            throw new HoldingValidationException("修改持股時不能變更股票代號");
         }
         HoldingTermsForm terms = request.terms();
         validate(terms);
@@ -77,12 +77,6 @@ class HoldingApiController {
                 .map(ConstraintViolation::getMessage)
                 .sorted()
                 .findFirst()
-                .ifPresent(message -> { throw new ApiValidationException(message); });
-    }
-
-    static class ApiValidationException extends RuntimeException {
-        ApiValidationException(String message) {
-            super(message);
-        }
+                .ifPresent(message -> { throw new HoldingValidationException(message); });
     }
 }
