@@ -43,7 +43,7 @@ class TradeDateRules {
         LocalDate today = today();
         if (editDateLocked(originalDate, today)) {
             if (!originalDate.equals(date)) {
-                throw new HoldingApiController.ApiValidationException("超過五年的交易不可修改日期");
+                throw new HoldingValidationException("超過五年的交易不可修改日期");
             }
             validateListing(code, date);
             return;
@@ -55,7 +55,7 @@ class TradeDateRules {
         validateLatest(date, today);
         LocalDate floor = fiveYearFloor(today);
         if (date.isBefore(floor)) {
-            throw new HoldingApiController.ApiValidationException(operation + "最早可填寫 " + floor + "（五年前）");
+            throw new HoldingValidationException(operation + "最早可填寫 " + floor + "（五年前）");
         }
         validateListing(code, date);
     }
@@ -66,14 +66,14 @@ class TradeDateRules {
 
     private void validateLatest(LocalDate date, LocalDate today) {
         if (date.isAfter(today)) {
-            throw new HoldingApiController.ApiValidationException("交易日期不能晚於今天");
+            throw new HoldingValidationException("交易日期不能晚於今天");
         }
     }
 
     private void validateListing(String code, LocalDate date) {
         LocalDate listing = firstListingDate(code);
         if (listing != null && date.isBefore(listing)) {
-            throw new HoldingApiController.ApiValidationException("交易日期不得早於首次上市或上櫃日 " + listing);
+            throw new HoldingValidationException("交易日期不得早於首次上市或上櫃日 " + listing);
         }
     }
 

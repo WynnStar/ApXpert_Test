@@ -26,21 +26,21 @@ record TradeInput(@JsonDeserialize(using = HoldingApiRequest.TextValue.class) St
                   Boolean confirmV2) {
     String stockCode() {
         if (code == null || !code.matches(CreateHoldingForm.CODE_PATTERN)) {
-            throw new HoldingApiController.ApiValidationException("請填寫合法股票代號");
+            throw new HoldingValidationException("請填寫合法股票代號");
         }
         return code;
     }
 
     Trade firstBuy() {
         if (side != null && side != Trade.Side.BUY) {
-            throw new HoldingApiController.ApiValidationException("建立持股時須先記錄一筆買進");
+            throw new HoldingValidationException("建立持股時須先記錄一筆買進");
         }
         return new Trade(Trade.Side.BUY, tradeDate, shares, unitPrice);
     }
 
     Trade trade() {
         if (side == null || side == Trade.Side.OPENING) {
-            throw new HoldingApiController.ApiValidationException("請選擇買進或賣出");
+            throw new HoldingValidationException("請選擇買進或賣出");
         }
         return new Trade(side, tradeDate, shares, unitPrice);
     }
