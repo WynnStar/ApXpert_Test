@@ -74,12 +74,18 @@
     <p>已有持股時，點清單中的「交易紀錄」登記下一筆交易。</p>
     <form th:action="@{/v2/holdings}" th:object="${trade}" method="post"
           th:attr="data-trade-date-url=@{/v2/holdings/trade-date-range},data-default-min=${maxTradeDate.minusYears(5)}">
-        <p><label>股票代號 <input type="text" th:field="*{code}" placeholder="例如 0050" required
-                                   maxlength="6" pattern="[0-9]{4}[0-9A-Z]{0,2}"></label></p>
+        <p>
+            <label for="code">股票代號</label>
+            <input type="text" th:field="*{code}" placeholder="例如 0050" required maxlength="6"
+                   pattern="[0-9]{4}[0-9A-Z]{0,2}" aria-describedby="stock-lookup-result"
+                   th:data-stock-lookup-url="@{/holdings/stock-lookup}">
+            <span id="stock-lookup-result" role="status"></span>
+        </p>
         <div th:replace="~{trades/form :: terms}"></div>
         <button type="submit">記錄買進</button>
     </form>
 </main>
+<script th:src="@{/js/stock-lookup.js}" defer></script>
 <script th:src="@{/js/trade-date-range.js}" defer></script>
 </body>
 </html>
