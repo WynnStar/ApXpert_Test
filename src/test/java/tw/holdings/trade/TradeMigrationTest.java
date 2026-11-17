@@ -14,6 +14,32 @@ class TradeMigrationTest {
     @TempDir Path temp;
 
     @Test
+    void keepsTheExistingSameDayOrderWhenUpgradingFromV6() throws Exception {
+        String url = "jdbc:h2:file:" + temp.resolve("trade-order").toString().replace('\\', '/');
+        Flyway.configure().dataSource(url, "sa", "").target("6").load().migrate();
+        try (var connection = DriverManager.getConnection(url, "sa", "");
+             var statement = connection.createStatement()) {
+            statement.executeUpdate("INSERT INTO holdings (id, code, lots, buy_price) VALUES (12, '0050', 2, 150)");
+            statement.executeUpdate("""
+                    INSERT INTO holding_trades (id, holding_id, side, trade_date, shares, unit_price)
+                    VALUES (25, 12, 'SELL', DATE '2026-11-16', 10, 155),
+                           (23, 12, 'BUY', DATE '2026-11-16', 10, 150)
+                    """);
+        }
+
+        assertEquals(1, Flyway.configure().dataSource(url, "sa", "").load().migrate().migrationsExecuted);
+        try (var connection = DriverManager.getConnection(url, "sa", "");
+             var statement = connection.createStatement();
+             var trades = statement.executeQuery(
+                     "SELECT side FROM holding_trades WHERE holding_id = 12 ORDER BY trade_date, sort_order, id")) {
+            assertTrue(trades.next());
+            assertEquals("BUY", trades.getString("side"));
+            assertTrue(trades.next());
+            assertEquals("SELL", trades.getString("side"));
+        }
+    }
+
+    @Test
     void upgradesAnExistingV1DatabaseWithoutChangingItsHoldings() throws Exception {
         String url = "jdbc:h2:file:" + temp.resolve("holdings").toString().replace('\\', '/');
         Flyway.configure().dataSource(url, "sa", "").target("3").load().migrate();
@@ -22,7 +48,7 @@ class TradeMigrationTest {
             statement.executeUpdate("INSERT INTO holdings (id, code, lots, buy_price) VALUES (12, '0050', 2, 150)");
         }
 
-        assertEquals(3, Flyway.configure().dataSource(url, "sa", "").load().migrate().migrationsExecuted);
+        assertEquals(4, Flyway.configure().dataSource(url, "sa", "").load().migrate().migrationsExecuted);
         try (var connection = DriverManager.getConnection(url, "sa", "");
              var statement = connection.createStatement()) {
             try (var rows = statement.executeQuery("SELECT id, code, lots, buy_price FROM holdings")) {

@@ -2,6 +2,7 @@ package tw.holdings.trade;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -15,8 +16,41 @@ public class TradeLedgerService {
         this.repository = repository;
     }
 
-    public List<Trade> trades(long holdingId) {
+    private List<Trade> trades(long holdingId) {
+        return entries(holdingId).stream().map(TradeEntry::trade).toList();
+    }
+
+    public List<TradeEntry> entries(long holdingId) {
         return repository.findByHolding(holdingId);
+    }
+
+    public enum Direction {
+        UP(-1), DOWN(1);
+
+        private final int offset;
+
+        Direction(int offset) {
+            this.offset = offset;
+        }
+    }
+
+    @Transactional
+    public void move(long holdingId, long tradeId, Direction direction) {
+        String code = repository.lockHoldingCode(holdingId)
+                .orElseThrow(() -> new TradeHoldingNotFoundException(holdingId));
+        var entries = entries(holdingId);
+        int index = IntStream.range(0, entries.size())
+                .filter(i -> entries.get(i).id() == tradeId)
+                .findFirst().orElseThrow(TradeOrderException::new);
+        int neighbor = index + direction.offset;
+        TradeEntry entry = entries.get(index);
+        if (neighbor < 0 || neighbor >= entries.size() || !entry.sameDayAs(entries.get(neighbor))) {
+            throw new TradeOrderException();
+        }
+
+        repository.swapOrder(holdingId, entry, entries.get(neighbor));
+        // 與新增交易共用回放規則。任何一筆賣出超過當時股數，順序變更會隨交易回滾。
+        TradeLedger.replay(code, trades(holdingId));
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -36,6 +70,6 @@ public class TradeLedgerService {
                 .orElseThrow(() -> new TradeHoldingNotFoundException(holdingId));
         // 回放失敗會回滾新增的交易，持股列鎖則讓同一檔不能同時驗證兩筆賣出。
         repository.insert(holdingId, trade);
-        return TradeLedger.replay(code, repository.findByHolding(holdingId));
+        return TradeLedger.replay(code, trades(holdingId));
     }
 }

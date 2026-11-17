@@ -11,6 +11,7 @@
     <p><a th:href="@{/v2/holdings}">回新版持股清單</a></p>
     <h1 th:text="|${holding.code} ${holding.name ?: ''} 交易紀錄|"></h1>
     <p th:if="${notice}" th:text="${notice}" role="status"></p>
+    <p th:if="${orderError}" th:text="${orderError}" role="alert"></p>
     <dl>
         <dt>總股數</dt><dd th:text="${holding.shares}"></dd>
         <dt>每股平均成本（含費）</dt><dd th:text="${holding.displayAverageCost() ?: '—'}"></dd>
@@ -20,13 +21,20 @@
 
     <table>
         <caption>交易紀錄</caption>
-        <thead><tr><th>日期</th><th>方向</th><th>股數</th><th>每股價格</th></tr></thead>
+        <thead><tr><th>日期</th><th>方向</th><th>股數</th><th>每股價格</th><th>調整同日順序</th></tr></thead>
         <tbody>
         <tr th:each="entry : ${history.trades}">
             <td th:text="${entry.tradeDate ?: '—'}"></td>
             <td th:text="${entry.side == 'OPENING' ? '期初持股' : (entry.side == 'BUY' ? '買進' : '賣出')}"></td>
             <td th:text="${entry.shares}"></td>
             <td th:text="${entry.unitPrice}"></td>
+            <td>
+                <form th:if="${entry.canMoveUp or entry.canMoveDown}" method="post"
+                      th:action="@{/v2/holdings/{id}/trades/{tradeId}/move(id=${holding.id},tradeId=${entry.id})}">
+                    <button th:if="${entry.canMoveUp}" type="submit" name="direction" value="UP">上移</button>
+                    <button th:if="${entry.canMoveDown}" type="submit" name="direction" value="DOWN">下移</button>
+                </form>
+            </td>
         </tr>
         </tbody>
     </table>

@@ -14,9 +14,12 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import tw.holdings.trade.InsufficientSharesException;
+import tw.holdings.trade.TradeLedgerService.Direction;
+import tw.holdings.trade.TradeOrderException;
 
 @Controller
 @RequestMapping("/v2/holdings")
@@ -69,6 +72,20 @@ class TradePageController {
             errors.reject("trade", error.getMessage());
             return showDetail(id, model);
         }
+    }
+
+    @PostMapping("/{id}/trades/{tradeId}/move")
+    String move(@PathVariable long id, @PathVariable long tradeId, @RequestParam Direction direction,
+                RedirectAttributes redirect) {
+        try {
+            service.move(id, tradeId, direction);
+            redirect.addFlashAttribute("notice", "已調整同日交易順序");
+        } catch (TradeOrderException error) {
+            redirect.addFlashAttribute("orderError", error.getMessage());
+        } catch (InsufficientSharesException error) {
+            redirect.addFlashAttribute("orderError", "無法調整順序。調整後會發生超賣：" + error.getMessage());
+        }
+        return "redirect:/v2/holdings/" + id;
     }
 
     @ExceptionHandler(HoldingNotFoundException.class)
