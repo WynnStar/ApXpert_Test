@@ -9,11 +9,31 @@
 
 在專案根目錄執行一條指令。
 
-Windows PowerShell
+### Windows PowerShell
+
+先確認 `JAVA_HOME` 指向已安裝的 JDK 17 或以上版本的**根目錄**，
+例如 `C:\Program Files\Java\jdk-17`。請按電腦上的實際安裝路徑修改，
+路徑最後不用加 `\bin`。即使 `java -version` 可執行，
+Windows 的 Maven Wrapper 仍需要這個變數。
+
+在同一個 PowerShell 視窗執行以下命令。若已設定正確，可跳過第一行。
+
+```powershell
+$env:JAVA_HOME = 'C:\Program Files\Java\jdk-17'
+echo $env:JAVA_HOME
+& "$env:JAVA_HOME\bin\java.exe" -version
+& "$env:JAVA_HOME\bin\javac.exe" -version
+```
+
+確認 `java` 和 `javac` 都顯示 17 或以上版本後，在同一個視窗的專案根目錄啟動：
 
 ```powershell
 .\mvnw.cmd spring-boot:run
 ```
+
+上述 `$env:JAVA_HOME` 設定只對目前的 PowerShell 工作階段有效。
+若顯示 `JAVA_HOME not found` 或 `JAVA_HOME is set to an invalid directory`，
+請核對變數是否有值，且該目錄下有 `bin\java.exe` 和 `bin\javac.exe`。
 
 macOS／Linux
 
@@ -24,17 +44,49 @@ sh ./mvnw spring-boot:run
 在瀏覽器開啟 <http://localhost:8080/>，即可看到「持股記帳」與目前台北時間。
 重新整理頁面會更新時間。按 Ctrl+C 停止服務。
 
-## 持股操作
+### 如果 8080 已被占用
 
-啟動後從首頁進入「持股清單」，或直接開啟 <http://localhost:8080/holdings>。
-新增一筆代號 `0050`、張數 `2`、買進價 `150.00` 的持股，再試著修改張數、重複新增及刪除。
-同一代號只可有一筆持股。修改時可調整張數和每股買進價。
+先停止先前啟動的服務，或改用另一個空閒的埠，例如 8081。
+
+Windows PowerShell
+
+```powershell
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.arguments=--server.port=8081"
+```
+
+macOS／Linux
+
+```sh
+sh ./mvnw spring-boot:run '-Dspring-boot.run.arguments=--server.port=8081'
+```
+
+改埠後請用 <http://localhost:8081/>，手機或模擬器的 App 伺服器設定也要更換埠號。
+
+## 2.0 持股操作與驗收
+
+從首頁選「開啟持股記帳 2.0」，或直接開啟 <http://localhost:8080/v2/holdings>。
+若已換埠，請把下列網址的 8080 替換成實際埠號。
+
+1. 在「建立新版持股」輸入股票代號 `0050`、今天日期、`300` 股及每股價格 `150.00`，按「記錄買進」。股數以股為單位。
+2. 在個股交易明細選「賣出」，使用同一天或之後的日期，輸入 `100` 股、每股 `160.00`，按「儲存交易」。
+3. 確認還有 `200` 股、已實現損益為 `940.67` 元，交易紀錄有一筆買進和一筆賣出。再試著賣出 `201` 股，應顯示持股不足且交易筆數不變。
+4. 回到清單查看總計。未實現損益使用最近交易日的官方收盤價，實際值會隨行情變動。
+
+範例請使用乾淨的測試資料庫。同一股票已在清單時，從該筆「交易紀錄」追加買進或賣出。
+
+## App 1.0 相容清單
+
+從首頁選「App 1.0 相容清單」，或直接開啟 <http://localhost:8080/holdings>。
+這裡以張為單位，可新增持股、修改張數和每股買進價、刪除及檢查重複代號。
+2.0 新建或已轉換的持股會出現在新版清單。
+
+## 本機資料庫
 
 首次啟動時，Flyway 會在專案的 H2 檔案資料庫建立資料表。
-從專案根目錄啟動時，資料保存在 `data/`，重新啟動後仍可讀取。
-這個目錄不會納入 Git。直接用 Eclipse 執行時，請讓 Run Configuration
-使用專案根目錄作為工作目錄，才能讀取同一份本機資料。
-
+從可寫入的專案根目錄啟動，資料會存在 `data/`，重啟後仍可讀取。
+同一份 H2 檔案請一次只由一個應用程式使用。如果顯示資料庫檔案正在使用，
+先關掉其他執行中的實例。這個目錄不會納入 Git。
+若從 Eclipse 啟動，請在 Run Configuration 將工作目錄設為專案根目錄。
 
 ## 官方行情
 
