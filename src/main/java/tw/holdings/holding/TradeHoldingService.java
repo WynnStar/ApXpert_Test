@@ -129,7 +129,7 @@ class TradeHoldingService {
         TradeEntry original = findTrade(ledger.entries(id), tradeId);
         Trade edited = form.applyTo(original.trade().side());
         if (edited.side() != Trade.Side.OPENING) {
-            dates.validateEdit(holding.code(), edited.tradeDate());
+            dates.validateEdit(holding.code(), original.trade().tradeDate(), edited.tradeDate());
             validateBuy(holding.code(), edited);
         }
         if (!holding.isV2Managed()) {

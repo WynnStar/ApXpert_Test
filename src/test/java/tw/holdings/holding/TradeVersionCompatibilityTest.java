@@ -756,9 +756,31 @@ class TradeVersionCompatibilityTest {
         mvc.perform(post(edit).param("tradeDate", listing.toString()).param("shares", "300").param("unitPrice", "101"))
                 .andExpect(redirectedUrl("/v2/holdings/" + id));
 
-        LocalDate oldTrade = today.minusYears(6);
+        LocalDate fiveYearsAgo = today.minusYears(5);
+        LocalDate oldTrade = fiveYearsAgo.minusDays(1);
         jdbc.update("UPDATE market_identity SET listed_on = ? WHERE code = '2330'", oldTrade.minusYears(1));
+        jdbc.update("UPDATE holding_trades SET trade_date = ? WHERE id = ?", fiveYearsAgo, tradeId);
+        mvc.perform(get(edit)).andExpect(content().string(containsString("type=\"date\"")))
+                .andExpect(content().string(containsString("min=\"" + fiveYearsAgo + "\"")))
+                .andExpect(content().string(not(containsString("超過五年，日期不可修改"))));
+        mvc.perform(post(edit).param("tradeDate", oldTrade.toString())
+                        .param("shares", "999").param("unitPrice", "999"))
+                .andExpect(content().string(containsString("修改交易日期最早可填寫 " + fiveYearsAgo)));
+        mvc.perform(get(V2 + "/" + id + "/trades")).andExpect(jsonPath("$[0].shares").value(300))
+                .andExpect(jsonPath("$[0].trade_date").value(fiveYearsAgo.toString()));
+        mvc.perform(post(edit).param("tradeDate", fiveYearsAgo.plusDays(1).toString())
+                        .param("shares", "300").param("unitPrice", "101"))
+                .andExpect(redirectedUrl("/v2/holdings/" + id));
+
         jdbc.update("UPDATE holding_trades SET trade_date = ? WHERE id = ?", oldTrade, tradeId);
+        mvc.perform(get(edit)).andExpect(content().string(not(containsString("type=\"date\""))))
+                .andExpect(content().string(containsString("超過五年，日期不可修改")))
+                .andExpect(content().string(containsString("name=\"tradeDate\" value=\"" + oldTrade + "\"")));
+        mvc.perform(post(edit).param("tradeDate", today.toString()).param("shares", "999").param("unitPrice", "999"))
+                .andExpect(content().string(containsString("超過五年的交易不可修改日期")))
+                .andExpect(content().string(containsString("name=\"tradeDate\" value=\"" + oldTrade + "\"")));
+        mvc.perform(get(V2 + "/" + id + "/trades")).andExpect(jsonPath("$[0].shares").value(300))
+                .andExpect(jsonPath("$[0].trade_date").value(oldTrade.toString()));
         mvc.perform(post(edit).param("tradeDate", oldTrade.toString()).param("shares", "301").param("unitPrice", "102"))
                 .andExpect(redirectedUrl("/v2/holdings/" + id));
         mvc.perform(get(V2 + "/" + id + "/trades")).andExpect(jsonPath("$[0].shares").value(301))

@@ -24,30 +24,44 @@ class TradeDateRules {
         return LocalDate.ofInstant(clock.instant(), TAIPEI);
     }
 
-    Range newTradeRange(String code) {
+    Range range(String code) {
         LocalDate today = today();
-        LocalDate floor = today.minusYears(5);
+        LocalDate floor = fiveYearFloor(today);
         LocalDate listing = firstListingDate(code);
         return new Range(listing != null && listing.isAfter(floor) ? listing : floor, today, listing);
     }
 
-    Range editRange(String code) {
-        LocalDate listing = firstListingDate(code);
-        return new Range(listing, today(), listing);
+    void validateNew(String code, LocalDate date, LocalDate today) {
+        validateDateInRange(code, date, today, "新增交易");
     }
 
-    void validateNew(String code, LocalDate date, LocalDate today) {
+    boolean editDateLocked(LocalDate originalDate, LocalDate today) {
+        return originalDate != null && originalDate.isBefore(fiveYearFloor(today));
+    }
+
+    void validateEdit(String code, LocalDate originalDate, LocalDate date) {
+        LocalDate today = today();
+        if (editDateLocked(originalDate, today)) {
+            if (!originalDate.equals(date)) {
+                throw new HoldingApiController.ApiValidationException("超過五年的交易不可修改日期");
+            }
+            validateListing(code, date);
+            return;
+        }
+        validateDateInRange(code, date, today, "修改交易日期");
+    }
+
+    private void validateDateInRange(String code, LocalDate date, LocalDate today, String operation) {
         validateLatest(date, today);
-        LocalDate floor = today.minusYears(5);
+        LocalDate floor = fiveYearFloor(today);
         if (date.isBefore(floor)) {
-            throw new HoldingApiController.ApiValidationException("新增交易最早可填寫 " + floor + "（五年前）");
+            throw new HoldingApiController.ApiValidationException(operation + "最早可填寫 " + floor + "（五年前）");
         }
         validateListing(code, date);
     }
 
-    void validateEdit(String code, LocalDate date) {
-        validateLatest(date, today());
-        validateListing(code, date);
+    private LocalDate fiveYearFloor(LocalDate today) {
+        return today.minusYears(5);
     }
 
     private void validateLatest(LocalDate date, LocalDate today) {
