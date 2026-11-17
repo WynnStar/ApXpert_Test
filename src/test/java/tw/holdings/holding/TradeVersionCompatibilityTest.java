@@ -123,9 +123,15 @@ class TradeVersionCompatibilityTest {
                         .content("{\"lots\":3,\"buy_price\":151.50}"))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("HOLDING_REQUIRES_V2"));
         mvc.perform(get(V1 + "/" + id)).andExpect(status().isConflict());
+        String duplicateMessage = "0050 已在持股中，請使用 2.0 網頁，或將 App 更新至 2.0 後操作";
         mvc.perform(post(V1).contentType(MediaType.APPLICATION_JSON).content(OLD_BUY))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.error.code").value("DUPLICATE_CODE"))
-                .andExpect(jsonPath("$.error.message", containsString("2.0")));
+                .andExpect(jsonPath("$.error.message").value(duplicateMessage));
+        var duplicate = mvc.perform(post("/holdings").param("code", "0050")
+                        .param("terms.lots", "2").param("terms.buyPrice", "150"))
+                .andExpect(redirectedUrl("/holdings")).andReturn();
+        mvc.perform(get("/holdings").flashAttrs(duplicate.getFlashMap()))
+                .andExpect(content().string(containsString(duplicateMessage)));
 
         mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON)
                         .content(sale.replace("2301", "400").replace("true", "false")))
