@@ -92,6 +92,80 @@ class TradeLedgerTest {
                 trade(SELL, DAY.plusDays(1), 301, "15.00"))));
     }
 
+    @Test
+    void laterBuyChangesRemainingAverageCostButKeepsPriorRealizedProfit() {
+        Trade firstBuy = trade(BUY, DAY, 1_000, "10.00");
+        Trade sale = trade(SELL, DAY.plusDays(1), 400, "12.00");
+        var beforeLaterBuy = TradeLedger.replay("2330", List.of(firstBuy, sale));
+        var afterLaterBuy = TradeLedger.replay("2330", List.of(
+                firstBuy, sale, trade(BUY, DAY.plusDays(2), 400, "20.00")));
+
+        // 買進成本 10,020；賣出分攤 4,008，淨損益為 4,800 - 20 - 14 - 4,008。
+        assertEquals(600, beforeLaterBuy.shares());
+        assertEquals(new BigDecimal("6012.00"), beforeLaterBuy.remainingCost());
+        assertEquals(new BigDecimal("10.0200"), beforeLaterBuy.averageCost());
+        assertEquals(new BigDecimal("4008.00"), beforeLaterBuy.realizedCost());
+        assertEquals(new BigDecimal("758.00"), beforeLaterBuy.realizedPnl());
+
+        // 後買進的 8,020 元僅加入剩餘成本，不能回頭改變先前賣出的成本或損益。
+        assertEquals(1_000, afterLaterBuy.shares());
+        assertEquals(new BigDecimal("14032.00"), afterLaterBuy.remainingCost());
+        assertEquals(new BigDecimal("14.0320"), afterLaterBuy.averageCost());
+        assertEquals(beforeLaterBuy.realizedCost(), afterLaterBuy.realizedCost());
+        assertEquals(beforeLaterBuy.realizedPnl(), afterLaterBuy.realizedPnl());
+        assertEquals(new BigDecimal("18040.00"),
+                afterLaterBuy.realizedCost().add(afterLaterBuy.remainingCost()));
+        assertEquals(new BigDecimal("902.00"),
+                afterLaterBuy.unrealizedPnl("2330", new BigDecimal("15.00")));
+    }
+
+    @Test
+    void separateSmallSalesEachPayTheMinimumFee() {
+        Trade buy = trade(BUY, DAY, 1_000, "10.00");
+        var splitSales = TradeLedger.replay("2330", List.of(
+                buy, trade(SELL, DAY.plusDays(1), 500, "20.00"),
+                trade(SELL, DAY.plusDays(2), 500, "20.00")));
+        var singleSale = TradeLedger.replay("2330", List.of(
+                buy, trade(SELL, DAY.plusDays(1), 1_000, "20.00")));
+
+        // 分兩次各賣 10,000 元，各收 20 元手續費；一次賣 20,000 元收 28 元。
+        assertEquals(0, splitSales.shares());
+        assertEquals(new BigDecimal("0.00"), splitSales.remainingCost());
+        assertEquals(new BigDecimal("10020.00"), splitSales.realizedCost());
+        assertEquals(new BigDecimal("9880.00"), splitSales.realizedPnl());
+        assertEquals(new BigDecimal("9892.00"), singleSale.realizedPnl());
+        assertEquals(new BigDecimal("12.00"),
+                singleSale.realizedPnl().subtract(splitSales.realizedPnl()));
+    }
+
+    @Test
+    void multipleBuysAndSalesConserveAllCostsUntilTheLastShareIsSold() {
+        Trade firstBuy = trade(BUY, DAY, 300, "10.01");
+        Trade secondBuy = trade(BUY, DAY.plusDays(1), 700, "12.34");
+        Trade firstSale = trade(SELL, DAY.plusDays(2), 333, "15.00");
+        var partiallySold = TradeLedger.replay("2330", List.of(firstBuy, secondBuy, firstSale));
+        var closed = TradeLedger.replay("2330", List.of(
+                firstBuy, secondBuy, firstSale, trade(SELL, DAY.plusDays(3), 667, "16.00")));
+
+        // 兩筆買進成本為 3,003 + 20 + 8,638 + 20 = 11,681 元。
+        // 首次賣出分攤 11,681 × 333 / 1,000 = 3,889.77，剩餘成本取差額。
+        assertEquals(667, partiallySold.shares());
+        assertEquals(new BigDecimal("3889.77"), partiallySold.realizedCost());
+        assertEquals(new BigDecimal("7791.23"), partiallySold.remainingCost());
+        assertEquals(new BigDecimal("11.6810"), partiallySold.averageCost());
+        assertEquals(new BigDecimal("1071.23"), partiallySold.realizedPnl());
+        assertEquals(new BigDecimal("11681.00"),
+                partiallySold.realizedCost().add(partiallySold.remainingCost()));
+
+        // 淨賣出收入為 (4,995 - 20 - 14) + (10,672 - 20 - 32) = 15,581 元。
+        assertEquals(0, closed.shares());
+        assertEquals(new BigDecimal("0.00"), closed.remainingCost());
+        assertEquals(new BigDecimal("11681.00"), closed.realizedCost());
+        assertEquals(new BigDecimal("3900.00"), closed.realizedPnl());
+        assertNull(closed.averageCost());
+        assertEquals(new BigDecimal("0.00"), closed.unrealizedPnl("2330", null));
+    }
+
     private Trade trade(Trade.Side side, LocalDate date, long shares, String price) {
         return new Trade(side, date, shares, new BigDecimal(price));
     }
