@@ -4,8 +4,8 @@
 <span th:fragment="money(value)" th:with="sign=${value == null ? 0 : value.signum()}"
       th:class="${sign > 0 ? 'profit-positive' : (sign < 0 ? 'profit-negative' : null)}"
       th:text="${value == null ? '未取得' : (sign > 0 ? '+' : '') + #numbers.formatDecimal(value, 1, 'COMMA', 2, 'POINT') + ' 元'}"></span>
-<span th:fragment="rate(value)" th:with="sign=${value == null ? 0 : value.signum()}"
+<span th:fragment="rate(value, missingText)" th:with="sign=${value == null ? 0 : value.signum()}"
       th:class="${sign > 0 ? 'profit-positive' : (sign < 0 ? 'profit-negative' : null)}"
-      th:text="${value == null ? '未取得' : (value.signum() > 0 ? '+' : '') + value.toPlainString() + '%'}"></span>
+      th:text="${value == null ? missingText : (value.signum() > 0 ? '+' : '') + value.toPlainString() + '%'}"></span>
 </body>
 </html>

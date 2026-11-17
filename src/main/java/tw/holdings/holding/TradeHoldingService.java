@@ -210,7 +210,8 @@ class TradeHoldingService {
         }
         var view = new TradeHoldingView(holding.id(), holding.code(), name, market, holding.isV2Managed(),
                 position.shares(), position.remainingCost(), position.averageCost(), position.realizedPnl(),
-                position.unrealizedPnl(holding.code(), close), close, found ? quote.priceDate() : null, delisting);
+                position.unrealizedPnl(holding.code(), close), close, found ? quote.priceDate() : null,
+                position.realizedCost(), delisting);
         return new TradeHoldingView.History(view, TradeHoldingView.TradeDetail.from(entries));
     }
 }

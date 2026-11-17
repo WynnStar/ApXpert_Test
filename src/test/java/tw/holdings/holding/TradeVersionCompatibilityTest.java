@@ -140,7 +140,9 @@ class TradeVersionCompatibilityTest {
         mvc.perform(get(trades)).andExpect(jsonPath("$.length()").value(3))
                 .andExpect(jsonPath("$[2].side").value("SELL"));
         mvc.perform(get("/v2/holdings/" + id)).andExpect(status().isOk())
-                .andExpect(content().string(containsString("class=\"profit-positive\">+7,228.17 元")));
+                .andExpect(content().string(containsString("class=\"profit-positive\">+7,228.17 元")))
+                .andExpect(content().string(containsString("<dt>已實現損益率</dt>")))
+                .andExpect(content().string(containsString("class=\"profit-positive\">+11.93%")));
     }
 
     @Test
@@ -206,7 +208,9 @@ class TradeVersionCompatibilityTest {
                 .andExpect(content().string(containsString("class=\"profit-negative\">-61,489.00 元")))
                 .andExpect(content().string(containsString("class=\"profit-positive\">+12.90%")))
                 .andExpect(content().string(containsString("class=\"profit-negative\">-2.52%")))
-                .andExpect(content().string(containsString("總已實現損益")))
+                .andExpect(content().string(containsString("<dt>總已實現損益率</dt>")))
+                .andExpect(content().string(org.hamcrest.Matchers.matchesPattern(
+                        "(?s).*<dt>總已實現損益率</dt>\\s*<dd><span>—</span></dd>.*")))
                 .andExpect(content().string(containsString("901,281.00 元")))
                 .andExpect(content().string(containsString("580,000.00 元")))
                 .andExpect(content().string(containsString("有 1 筆持股未取得收盤價")))
@@ -214,12 +218,36 @@ class TradeVersionCompatibilityTest {
         String page = result.getResponse().getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
         int cursor = page.indexOf("持股總計");
         for (String label : new String[]{"股票代號", "股票名稱", "市場", "股數", "每股平均成本（含費）",
-                "收盤價", "收盤日期", "未實現損益", "收益率", "已實現損益", "操作"}) {
+                "收盤價", "收盤日期", "未實現損益", "未實現損益率", "已實現損益", "已實現損益率", "操作"}) {
             int next = page.indexOf("<th>" + label + "</th>", cursor);
             org.junit.jupiter.api.Assertions.assertTrue(next > cursor, label);
             cursor = next;
         }
         org.junit.jupiter.api.Assertions.assertTrue(page.matches("(?s).*<td>6488</td>.*?未取得.*?未取得.*?未取得.*"));
+    }
+
+    @Test
+    void realizedRatesUseAllocatedCostAndIncludeClosedPositionsInTheTotal() throws Exception {
+        long etf = createLegacy(OLD_BUY);
+        mvc.perform(post(V2 + "/" + etf + "/trades").contentType(MediaType.APPLICATION_JSON).content("""
+                {"side":"SELL","trade_date":"2026-11-17","shares":2000,"unit_price":160,"confirm_v2":true}
+                """)).andExpect(status().isCreated());
+        var created = mvc.perform(post(V2).contentType(MediaType.APPLICATION_JSON).content("""
+                {"code":"2330","trade_date":"2026-11-16","shares":100,"unit_price":100}
+                """)).andExpect(status().isCreated()).andReturn();
+        long stock = json.readTree(created.getResponse().getContentAsByteArray()).get("id").longValue();
+        mvc.perform(post(V2 + "/" + stock + "/trades").contentType(MediaType.APPLICATION_JSON).content("""
+                {"side":"SELL","trade_date":"2026-11-17","shares":100,"unit_price":90}
+                """)).andExpect(status().isCreated());
+
+        mvc.perform(get("/v2/holdings")).andExpect(status().isOk())
+                .andExpect(content().string(containsString("class=\"profit-positive\">+6.26%")))
+                .andExpect(content().string(containsString("class=\"profit-negative\">-10.65%")))
+                .andExpect(content().string(org.hamcrest.Matchers.matchesPattern(
+                        "(?s).*<dt>總已實現損益率</dt>\\s*<dd><span class=\"profit-positive\">\\+5\\.71%</span></dd>.*")));
+        mvc.perform(get("/v2/holdings/" + stock)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("class=\"profit-negative\">-10.65%")));
+        mvc.perform(get(V2 + "/" + stock)).andExpect(jsonPath("$.realized_cost").doesNotExist());
     }
 
     @Test
@@ -244,7 +272,13 @@ class TradeVersionCompatibilityTest {
                 .andExpect(content().string(containsString("<td>170.00</td>")))
                 .andExpect(content().string(containsString("<td>2026-11-16</td>")))
                 .andExpect(content().string(org.hamcrest.Matchers.matchesPattern(
-                        "(?s).*<dt>總市值</dt>\\s*<dd>0.00 元</dd>.*")));
+                        "(?s).*<dt>總市值</dt>\\s*<dd>0.00 元</dd>.*")))
+                .andExpect(content().string(org.hamcrest.Matchers.matchesPattern(
+                        "(?s).*<dt>總未實現損益率</dt>\\s*<dd><span>—</span></dd>.*")))
+                .andExpect(content().string(not(containsString(">0.00%</span>"))));
+        mvc.perform(get("/v2/holdings/" + id)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("<dt>未實現損益率</dt><dd><span>—</span></dd>")))
+                .andExpect(content().string(containsString("+6.26%")));
 
         when(quotes.lookup("0050", Market.TWSE)).thenReturn(
                 new QuoteResult(QuoteResult.Status.UNAVAILABLE, null, null, null, null));

@@ -6,19 +6,21 @@ import java.util.List;
 import tw.holdings.profit.ProfitCalculator;
 
 record TradePortfolioSummary(BigDecimal remainingCost, BigDecimal marketValue, BigDecimal unrealizedPnl,
-                             BigDecimal returnPct, BigDecimal realizedPnl, int quoteMissing,
-                             BigDecimal delistedCost) {
+                             BigDecimal unrealizedReturnPct, BigDecimal realizedPnl, BigDecimal realizedReturnPct,
+                             int quoteMissing, BigDecimal delistedCost) {
     static TradePortfolioSummary from(List<TradeHoldingView> holdings) {
         BigDecimal cost = BigDecimal.ZERO;
         BigDecimal market = BigDecimal.ZERO;
         BigDecimal unrealized = BigDecimal.ZERO;
         BigDecimal realized = BigDecimal.ZERO;
+        BigDecimal realizedCost = BigDecimal.ZERO;
         int missing = 0;
         BigDecimal delistedCost = BigDecimal.ZERO;
 
         for (TradeHoldingView holding : holdings) {
             cost = cost.add(holding.remainingCost());
             realized = realized.add(holding.realizedPnl());
+            realizedCost = realizedCost.add(holding.realizedCost());
             if (holding.shares() == 0) {
                 continue;
             }
@@ -34,7 +36,10 @@ record TradePortfolioSummary(BigDecimal remainingCost, BigDecimal marketValue, B
             unrealized = unrealized.add(holding.unrealizedPnl());
         }
 
-        return new TradePortfolioSummary(cost, market, unrealized,
-                ProfitCalculator.returnPercentage(unrealized, cost), realized, missing, delistedCost);
+        BigDecimal realizedRate = realizedCost.signum() == 0 ? null
+                : ProfitCalculator.returnPercentage(realized, realizedCost);
+        BigDecimal unrealizedRate = cost.signum() == 0 ? null : ProfitCalculator.returnPercentage(unrealized, cost);
+        return new TradePortfolioSummary(cost, market, unrealized, unrealizedRate, realized, realizedRate,
+                missing, delistedCost);
     }
 }

@@ -16,8 +16,10 @@
     <dl>
         <dt>總股數</dt><dd th:text="${holding.shares}"></dd>
         <dt>每股平均成本（含費）</dt><dd th:text="${holding.displayAverageCost() ?: '—'}"></dd>
-        <dt>已實現損益</dt><dd><span th:replace="~{trades/profit :: money(${holding.realizedPnl})}"></span></dd>
         <dt>未實現損益</dt><dd><span th:replace="~{trades/profit :: money(${holding.unrealizedPnl})}"></span></dd>
+        <dt>未實現損益率</dt><dd><span th:replace="~{trades/profit :: rate(${holding.unrealizedReturnPct()}, ${holding.shares == 0 ? '—' : '未取得'})}"></span></dd>
+        <dt>已實現損益</dt><dd><span th:replace="~{trades/profit :: money(${holding.realizedPnl})}"></span></dd>
+        <dt>已實現損益率</dt><dd><span th:replace="~{trades/profit :: rate(${holding.realizedReturnPct()}, '—')}"></span></dd>
     </dl>
 
     <table>

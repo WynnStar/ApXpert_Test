@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import tw.holdings.profit.ProfitCalculator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -24,6 +25,7 @@ class TradeLedgerTest {
         assertEquals(new BigDecimal("21045.00"), position.remainingCost());
         assertEquals(new BigDecimal("11.6917"), position.averageCost());
         assertEquals(new BigDecimal("0.00"), position.realizedPnl());
+        assertEquals(new BigDecimal("0.00"), position.realizedCost());
     }
 
     @Test
@@ -35,8 +37,27 @@ class TradeLedgerTest {
         assertEquals(1_400, position.shares());
         assertEquals(new BigDecimal("16368.33"), position.remainingCost());
         assertEquals(new BigDecimal("1285.33"), position.realizedPnl());
+        assertEquals(new BigDecimal("4676.67"), position.realizedCost());
         assertEquals(new BigDecimal("4539.67"), position.unrealizedPnl("2330", new BigDecimal("15.00")));
         assertNull(position.unrealizedPnl("2330", null));
+    }
+
+    @Test
+    void conservesCostAndCalculatesBothRatesWhenTheAllocationContainsCents() {
+        var position = TradeLedger.replay("2330", List.of(
+                trade(BUY, DAY, 1_000, "1000.00"), trade(SELL, DAY.plusDays(1), 500, "1100.00")));
+        var unrealizedPnl = position.unrealizedPnl("2330", new BigDecimal("1050.00"));
+
+        assertEquals(500, position.shares());
+        assertEquals(new BigDecimal("500712.50"), position.realizedCost());
+        assertEquals(new BigDecimal("500712.50"), position.remainingCost());
+        assertEquals(new BigDecimal("1001425.00"), position.realizedCost().add(position.remainingCost()));
+        assertEquals(new BigDecimal("46854.50"), position.realizedPnl());
+        assertEquals(new BigDecimal("21964.50"), unrealizedPnl);
+        assertEquals(new BigDecimal("9.36"),
+                ProfitCalculator.returnPercentage(position.realizedPnl(), position.realizedCost()));
+        assertEquals(new BigDecimal("4.39"),
+                ProfitCalculator.returnPercentage(unrealizedPnl, position.remainingCost()));
     }
 
     @Test
@@ -60,6 +81,7 @@ class TradeLedgerTest {
 
         assertEquals(new BigDecimal("0.00"), position.remainingCost());
         assertEquals(new BigDecimal("30.00"), position.realizedPnl());
+        assertEquals(new BigDecimal("50.00"), position.realizedCost());
     }
 
     @Test
