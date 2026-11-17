@@ -17,37 +17,39 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping(path = "/api/v2/holdings", produces = MediaType.APPLICATION_JSON_VALUE)
 class TradeApiController {
-    private final TradeHoldingService service;
+    private final TradeHoldingService commands;
+    private final TradeHoldingQueryService queries;
 
-    TradeApiController(TradeHoldingService service) {
-        this.service = service;
+    TradeApiController(TradeHoldingService commands, TradeHoldingQueryService queries) {
+        this.commands = commands;
+        this.queries = queries;
     }
 
     @GetMapping
     List<TradeHoldingView> list() {
-        return service.list();
+        return queries.list();
     }
 
     @GetMapping("/{id}")
     TradeHoldingView get(@PathVariable long id) {
-        return service.history(id).holding();
+        return queries.history(id).holding();
     }
 
     @GetMapping("/{id}/trades")
     List<TradeHoldingView.TradeDetail> trades(@PathVariable long id) {
-        return service.history(id).trades();
+        return queries.history(id).trades();
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     TradeHoldingView create(@Valid @RequestBody TradeInput request) {
-        return get(service.create(request.stockCode(), request.firstBuy()));
+        return get(commands.create(request.stockCode(), request.firstBuy()));
     }
 
     @PostMapping("/{id}/trades")
     @ResponseStatus(HttpStatus.CREATED)
     TradeHoldingView append(@PathVariable long id, @Valid @RequestBody TradeInput request) {
-        service.append(id, request.trade(), request.confirmed());
+        commands.append(id, request.trade(), request.confirmed());
         return get(id);
     }
 }

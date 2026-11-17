@@ -15,7 +15,6 @@ import tw.holdings.trade.InsufficientSharesException;
 import tw.holdings.trade.Trade;
 import tw.holdings.trade.TradeEntry;
 import tw.holdings.trade.TradeHoldingNotFoundException;
-import tw.holdings.trade.TradeLedger;
 import tw.holdings.trade.TradeLedgerService;
 
 @Service
@@ -35,14 +34,6 @@ class TradeHoldingService {
         this.markets = markets;
         this.transactions = transactions;
         this.dates = dates;
-    }
-
-    List<TradeHoldingView> list() {
-        return holdings.findAllByOrderByIdAsc().stream().map(row -> history(row).holding()).toList();
-    }
-
-    TradeHoldingView.History history(long id) {
-        return history(holdings.findById(id).orElseThrow(() -> new HoldingNotFoundException(id)));
     }
 
     long create(String code, Trade firstBuy) {
@@ -100,29 +91,8 @@ class TradeHoldingService {
         }
     }
 
-    DeleteTarget deleteTarget(long id) {
-        Holding holding = holdings.findById(id).orElseThrow(() -> new HoldingNotFoundException(id));
-        return DeleteTarget.from(holding);
-    }
-
-    record DeleteTarget(long id, String code, String name) {
-        static DeleteTarget from(Holding holding) {
-            return new DeleteTarget(holding.id(), holding.code(), holding.name());
-        }
-    }
-
-    record TradeTarget(DeleteTarget holding, TradeEntry entry, boolean lastTrade, boolean v2Managed) {
-    }
-
     enum TradeDeletion {
         TRADE_DELETED, HOLDING_DELETED, CONFIRM_AGAIN
-    }
-
-    TradeTarget tradeTarget(long id, long tradeId) {
-        Holding holding = holdings.findById(id).orElseThrow(() -> new HoldingNotFoundException(id));
-        var entries = ledger.entries(id);
-        return new TradeTarget(DeleteTarget.from(holding), findTrade(entries, tradeId),
-                entries.size() == 1, holding.isV2Managed());
     }
 
     @Transactional
@@ -166,7 +136,7 @@ class TradeHoldingService {
     }
 
     private TradeEntry findTrade(List<TradeEntry> entries, long tradeId) {
-        return entries.stream().filter(entry -> entry.id() == tradeId).findFirst()
+        return TradeEntry.findById(entries, tradeId)
                 .orElseThrow(() -> new HoldingTradeNotFoundException(tradeId));
     }
 
@@ -195,25 +165,5 @@ class TradeHoldingService {
                 throw new HoldingApiController.ApiValidationException(message);
             });
         }
-    }
-
-    private TradeHoldingView.History history(Holding holding) {
-        var entries = ledger.entries(holding.id());
-        var position = TradeLedger.replay(holding.code(), entries.stream().map(TradeEntry::trade).toList());
-        var delisting = markets.delisting(holding.code()).orElse(null);
-        QuoteResult quote = delisting == null ? quotes.forDisplay(holding.code(), holding.market()) : null;
-        boolean found = quote != null && quote.status() == QuoteResult.Status.FOUND;
-        var close = found ? quote.close() : null;
-        String name = found ? quote.name() : holding.name();
-        var market = found ? quote.market() : holding.market();
-        if (delisting != null) {
-            name = name == null ? delisting.name() : name;
-            market = market == null ? delisting.market() : market;
-        }
-        var view = new TradeHoldingView(holding.id(), holding.code(), name, market, holding.isV2Managed(),
-                position.shares(), position.remainingCost(), position.averageCost(), position.realizedPnl(),
-                position.unrealizedPnl(holding.code(), close), close, found ? quote.priceDate() : null,
-                position.realizedCost(), delisting);
-        return new TradeHoldingView.History(view, TradeHoldingView.TradeDetail.from(entries));
     }
 }
