@@ -22,10 +22,9 @@ class Holding {
     @Column(nullable = false, updatable = false, length = 6)
     private String code;
 
-    @Column(nullable = false)
-    private int lots;
+    private Integer lots;
 
-    @Column(name = "buy_price", nullable = false, precision = 38, scale = 2)
+    @Column(name = "buy_price", precision = 38, scale = 2)
     private BigDecimal buyPrice;
 
     @Column(name = "stock_name", length = 255)
@@ -35,6 +34,9 @@ class Holding {
     @Column(length = 4)
     private Market market;
 
+    @Column(name = "v2_managed", nullable = false)
+    private boolean v2Managed;
+
     protected Holding() {
     }
 
@@ -43,6 +45,30 @@ class Holding {
         this.name = name;
         this.market = market;
         update(lots, buyPrice);
+    }
+
+    static Holding managed(String code, String name, Market market) {
+        Holding holding = new Holding();
+        holding.code = code;
+        holding.name = name;
+        holding.market = market;
+        holding.v2Managed = true;
+        return holding;
+    }
+
+    long id() { return id; }
+    String code() { return code; }
+    String name() { return name; }
+    Market market() { return market; }
+
+    boolean isV2Managed() {
+        return v2Managed;
+    }
+
+    void startV2Management() {
+        v2Managed = true;
+        lots = null;
+        buyPrice = null;
     }
 
     void update(int lots, BigDecimal buyPrice) {

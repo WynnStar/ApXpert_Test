@@ -9,7 +9,7 @@
     <main>
         <h1>持股記帳</h1>
         <p>目前時間（台北）：<time th:datetime="${dateTime}" th:text="${currentTime}">2000-01-01 00:00:00</time></p>
-        <p><a th:href="@{/holdings}">開啟持股清單</a></p>
+        <p><a th:href="@{/v2/holdings}">開啟持股記帳 2.0</a> · <a th:href="@{/holdings}">App 1.0 相容清單</a></p>
     </main>
 </body>
 </html>

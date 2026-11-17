@@ -3,12 +3,14 @@ package tw.holdings.holding;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import tw.holdings.quote.QuoteResult;
+import tw.holdings.trade.InsufficientSharesException;
 
-@RestControllerAdvice(assignableTypes = HoldingApiController.class)
+@RestControllerAdvice(assignableTypes = {HoldingApiController.class, TradeApiController.class})
 class HoldingApiErrors {
 
     @ExceptionHandler(HoldingApiController.ApiValidationException.class)
@@ -48,6 +50,23 @@ class HoldingApiErrors {
     @ExceptionHandler(StockIdentityUnavailableException.class)
     ResponseEntity<ApiErrorResponse> identityUnavailable(StockIdentityUnavailableException exception) {
         return respond(HttpStatus.SERVICE_UNAVAILABLE, "QUOTE_UNAVAILABLE", exception.getMessage());
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    ResponseEntity<ApiErrorResponse> invalidFields(MethodArgumentNotValidException exception) {
+        var error = exception.getBindingResult().getFieldError();
+        return respond(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR",
+                error == null ? "欄位格式錯誤" : error.getDefaultMessage());
+    }
+
+    @ExceptionHandler(HoldingVersionConflict.class)
+    ResponseEntity<ApiErrorResponse> versionConflict(HoldingVersionConflict exception) {
+        return respond(HttpStatus.CONFLICT, exception.code(), exception.getMessage());
+    }
+
+    @ExceptionHandler(InsufficientSharesException.class)
+    ResponseEntity<ApiErrorResponse> insufficientShares(InsufficientSharesException exception) {
+        return respond(HttpStatus.CONFLICT, "INSUFFICIENT_SHARES", exception.getMessage());
     }
 
     private ResponseEntity<ApiErrorResponse> respond(HttpStatus status, String code, String message) {

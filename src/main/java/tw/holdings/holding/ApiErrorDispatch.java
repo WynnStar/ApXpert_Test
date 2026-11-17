@@ -26,9 +26,9 @@ class ApiErrorDispatch {
             var httpResponse = (HttpServletResponse) response;
             var originalUri = (String) request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI);
             var status = (Integer) request.getAttribute(RequestDispatcher.ERROR_STATUS_CODE);
-            String apiPrefix = httpRequest.getContextPath() + "/api/v1";
+            String apiPrefix = httpRequest.getContextPath() + "/api/";
             if (originalUri == null || status == null || httpResponse.isCommitted()
-                    || (!originalUri.equals(apiPrefix) && !originalUri.startsWith(apiPrefix + "/"))) {
+                    || !originalUri.startsWith(apiPrefix)) {
                 chain.doFilter(request, response);
                 return;
             }

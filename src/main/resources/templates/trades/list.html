@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-Hant" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>持股記帳 2.0</title>
+    <link rel="stylesheet" th:href="@{/css/trade-profit.css}">
+</head>
+<body>
+<main>
+    <nav><a th:href="@{/}">回首頁</a> · <a th:href="@{/holdings}">App 1.0 相容清單</a></nav>
+    <h1>持股記帳 2.0</h1>
+    <section aria-labelledby="summary-heading">
+        <h2 id="summary-heading">持股總計</h2>
+        <dl>
+            <dt>總成本（剩餘持股，含買進手續費）</dt>
+            <dd th:text="|${#numbers.formatDecimal(summary.remainingCost, 1, 'COMMA', 2, 'POINT')} 元|"></dd>
+            <dt>總市值</dt>
+            <dd th:text="|${#numbers.formatDecimal(summary.marketValue, 1, 'COMMA', 2, 'POINT')} 元|"></dd>
+            <dt>總未實現損益</dt>
+            <dd><span th:replace="~{trades/profit :: money(${summary.unrealizedPnl})}"></span></dd>
+            <dt>總收益率</dt>
+            <dd><span th:replace="~{trades/profit :: rate(${summary.returnPct})}"></span></dd>
+            <dt>總已實現損益</dt>
+            <dd><span th:replace="~{trades/profit :: money(${summary.realizedPnl})}"></span></dd>
+        </dl>
+        <p th:if="${summary.quoteMissing > 0}"
+           th:text="|有 ${summary.quoteMissing} 筆持股未取得收盤價。這些持股仍計入總成本，市值與未實現損益暫不計入。|"></p>
+    </section>
+
+    <p th:if="${#lists.isEmpty(holdings)}">目前沒有持股。</p>
+    <table th:unless="${#lists.isEmpty(holdings)}">
+        <thead>
+        <tr>
+            <th>股票代號</th><th>股票名稱</th><th>市場</th><th>股數</th><th>每股平均成本（含費）</th>
+            <th>收盤價</th><th>收盤日期</th><th>未實現損益</th><th>收益率</th><th>已實現損益</th><th>操作</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="holding : ${holdings}">
+            <td th:text="${holding.code}"></td>
+            <td th:text="${holding.name ?: '未取得'}"></td>
+            <td th:text="${holding.market == null ? '未取得' : holding.market.label}"></td>
+            <td th:text="${holding.shares}"></td>
+            <td th:text="${holding.displayAverageCost() ?: '—'}"></td>
+            <td th:text="${holding.currentPrice ?: '未取得'}"></td>
+            <td th:text="${holding.priceDate ?: '未取得'}"></td>
+            <td><span th:replace="~{trades/profit :: money(${holding.unrealizedPnl})}"></span></td>
+            <td><span th:replace="~{trades/profit :: rate(${holding.unrealizedReturnPct()})}"></span></td>
+            <td><span th:replace="~{trades/profit :: money(${holding.realizedPnl})}"></span></td>
+            <td><a th:href="@{/v2/holdings/{id}(id=${holding.id})}">交易紀錄</a></td>
+        </tr>
+        </tbody>
+    </table>
+
+    <h2>建立新版持股</h2>
+    <p>這裡建立的持股由 2.0 管理，只會出現在新版持股清單與交易紀錄。</p>
+    <p>已有持股時，點清單中的「交易紀錄」登記下一筆交易。</p>
+    <form th:action="@{/v2/holdings}" th:object="${trade}" method="post">
+        <p><label>股票代號 <input type="text" th:field="*{code}" placeholder="例如 0050" required
+                                   maxlength="6" pattern="[0-9]{4}[0-9A-Z]{0,2}"></label></p>
+        <div th:replace="~{trades/form :: terms}"></div>
+        <button type="submit">記錄買進</button>
+    </form>
+</main>
+</body>
+</html>

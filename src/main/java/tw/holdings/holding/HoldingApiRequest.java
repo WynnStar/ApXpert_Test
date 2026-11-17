@@ -47,6 +47,20 @@ record HoldingApiRequest(
         }
     }
 
+    static class LongValue extends StdDeserializer<Long> {
+        LongValue() {
+            super(Long.class);
+        }
+
+        @Override
+        public Long deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+            if (!parser.hasToken(JsonToken.VALUE_NUMBER_INT)) {
+                return context.reportInputMismatch(Long.class, "Expected a JSON integer");
+            }
+            return parser.getLongValue();
+        }
+    }
+
     static class DecimalValue extends StdDeserializer<BigDecimal> {
         DecimalValue() {
             super(BigDecimal.class);
