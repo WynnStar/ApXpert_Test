@@ -90,6 +90,13 @@ sh ./mvnw spring-boot:run '-Dspring-boot.run.arguments=--server.port=8081'
 
 範例請使用乾淨的測試資料庫。同一股票已在清單時，從該筆「交易紀錄」追加買進或賣出。
 
+## App 2.0 API
+
+App 2.0 的新增、清單、單檔查詢、交易修改、整檔刪除及總計操作見 [API 串接指南](API.md)。
+新增 GET /api/v2/summary、PUT /api/v2/holdings/{id}/trades/{tradeId}、
+DELETE /api/v2/holdings/{id}。交易清單回傳 id，個股與總計回傳兩種損益率。
+修改與刪除共用網頁已有的交易、日期及超賣驗證，整檔刪除會一併移除全部交易。
+
 ## App 1.0 相容清單
 
 從首頁選「App 1.0 相容清單」，或直接開啟 <http://localhost:8080/holdings>。

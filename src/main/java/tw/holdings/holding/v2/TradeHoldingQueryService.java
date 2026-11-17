@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 import tw.holdings.holding.error.HoldingNotFoundException;
+import tw.holdings.holding.error.HoldingTradeNotFoundException;
 import tw.holdings.holding.persistence.HoldingStore;
 import tw.holdings.quote.QuoteResult;
 import tw.holdings.quote.QuoteService;
@@ -31,6 +32,10 @@ class TradeHoldingQueryService {
         return holdings.listAll().stream()
                 .map(holding -> holdingView(holding, ledger.entries(holding.id())))
                 .toList();
+    }
+
+    TradePortfolioSummary summary() {
+        return TradePortfolioSummary.from(list());
     }
 
     TradeHoldingView.History history(long id) {

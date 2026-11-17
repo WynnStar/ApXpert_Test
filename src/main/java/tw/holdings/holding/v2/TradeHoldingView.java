@@ -8,6 +8,7 @@ import java.util.stream.IntStream;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import tw.holdings.profit.ProfitCalculator;
@@ -25,18 +26,20 @@ record TradeHoldingView(long id, String code, String name, Market market, boolea
         return shares == 0 ? null : remainingCost.divide(BigDecimal.valueOf(shares), 2, RoundingMode.HALF_UP);
     }
 
+    @JsonProperty("unrealized_return_pct")
     public BigDecimal unrealizedReturnPct() {
         return unrealizedPnl == null || remainingCost.signum() == 0 ? null
                 : ProfitCalculator.returnPercentage(unrealizedPnl, remainingCost);
     }
 
+    @JsonProperty("realized_return_pct")
     public BigDecimal realizedReturnPct() {
         return realizedCost.signum() == 0 ? null : ProfitCalculator.returnPercentage(realizedPnl, realizedCost);
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     record TradeDetail(String side, @JsonFormat(shape = JsonFormat.Shape.STRING) LocalDate tradeDate,
-                       long shares, BigDecimal unitPrice, @JsonIgnore long id,
+                       long shares, BigDecimal unitPrice, long id,
                        @JsonIgnore boolean canMoveUp, @JsonIgnore boolean canMoveDown) {
         static List<TradeDetail> from(List<TradeEntry> entries) {
             return IntStream.range(0, entries.size()).mapToObj(index -> {
