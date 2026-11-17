@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import tw.holdings.quote.Market;
@@ -42,11 +43,13 @@ class HoldingApiTest {
 
     @Autowired MockMvc mvc;
     @Autowired HoldingRepository repository;
+    @Autowired JdbcTemplate jdbc;
     @Autowired ObjectMapper mapper;
     @MockitoBean QuoteService quotes;
 
     @BeforeEach
     void clearHoldings() {
+        jdbc.update("DELETE FROM holding_trades");
         repository.deleteAll();
     }
 

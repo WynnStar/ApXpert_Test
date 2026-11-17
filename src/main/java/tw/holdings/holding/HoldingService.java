@@ -7,19 +7,27 @@ import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import tw.holdings.profit.PortfolioSummary;
 import tw.holdings.profit.ProfitCalculator;
 import tw.holdings.quote.QuoteResult;
 import tw.holdings.quote.QuoteService;
+import tw.holdings.trade.TradeLedgerService;
 
 @Service
 class HoldingService {
     private final HoldingRepository repository;
     private final QuoteService quotes;
 
-    HoldingService(HoldingRepository repository, QuoteService quotes) {
+    private final TradeLedgerService ledger;
+    private final TransactionTemplate transactions;
+
+    HoldingService(HoldingRepository repository, QuoteService quotes,
+                   TradeLedgerService ledger, TransactionTemplate transactions) {
         this.repository = repository;
         this.quotes = quotes;
+        this.ledger = ledger;
+        this.transactions = transactions;
     }
 
     HoldingPortfolio portfolio() {
@@ -31,7 +39,7 @@ class HoldingService {
     }
 
     List<HoldingQuoteView> list() {
-        return repository.findAllByOrderByIdAsc().stream()
+        return repository.findAllByV2ManagedFalseOrderByIdAsc().stream()
                 .map(Holding::toDetails)
                 .map(this::withQuote)
                 .toList();
@@ -51,25 +59,29 @@ class HoldingService {
     }
 
     HoldingDetails get(long id) {
-        return find(id).toDetails();
+        return legacy(repository.findById(id).orElseThrow(() -> new HoldingNotFoundException(id))).toDetails();
     }
 
     HoldingDetails create(String code, int lots, BigDecimal buyPrice) {
         String normalizedCode = code.strip();
         if (repository.existsByCode(normalizedCode)) {
-            throw new DuplicateHoldingException(normalizedCode, null);
+            throw new DuplicateHoldingException(normalizedCode, null, repository.existsByCodeAndV2ManagedTrue(normalizedCode));
         }
         QuoteResult quote = quotes.lookup(normalizedCode, null);
         if (quote.status() != QuoteResult.Status.FOUND) {
             throw new StockLookupException(quote.status());
         }
         try {
-            return repository.saveAndFlush(new Holding(
-                    normalizedCode, lots, buyPrice, quote.name(), quote.market())).toDetails();
+            return transactions.execute(status -> {
+                Holding holding = repository.saveAndFlush(new Holding(
+                        normalizedCode, lots, buyPrice, quote.name(), quote.market()));
+                ledger.replaceLegacyOpening(holding.id(), lots, buyPrice);
+                return holding.toDetails();
+            });
         } catch (DataIntegrityViolationException exception) {
             if (exception.getMostSpecificCause() instanceof SQLException sqlException
                     && "23505".equals(sqlException.getSQLState())) {
-                throw new DuplicateHoldingException(normalizedCode, exception);
+                throw new DuplicateHoldingException(normalizedCode, exception, repository.existsByCodeAndV2ManagedTrue(normalizedCode));
             }
             throw exception;
         }
@@ -77,17 +89,27 @@ class HoldingService {
 
     @Transactional
     HoldingDetails update(long id, int lots, BigDecimal buyPrice) {
-        Holding holding = find(id);
+        Holding holding = lockLegacy(id);
         holding.update(lots, buyPrice);
+        ledger.replaceLegacyOpening(id, lots, buyPrice);
         return holding.toDetails();
     }
 
     @Transactional
     void delete(long id) {
-        repository.delete(find(id));
+        Holding holding = lockLegacy(id);
+        ledger.removeLegacyOpening(id);
+        repository.delete(holding);
     }
 
-    private Holding find(long id) {
-        return repository.findById(id).orElseThrow(() -> new HoldingNotFoundException(id));
+    private Holding lockLegacy(long id) {
+        return legacy(repository.lockById(id).orElseThrow(() -> new HoldingNotFoundException(id)));
+    }
+
+    private Holding legacy(Holding holding) {
+        if (holding.isV2Managed()) {
+            throw HoldingVersionConflict.managedByV2();
+        }
+        return holding;
     }
 }

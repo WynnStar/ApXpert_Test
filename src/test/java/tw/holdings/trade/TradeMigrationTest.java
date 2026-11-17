@@ -22,7 +22,7 @@ class TradeMigrationTest {
             statement.executeUpdate("INSERT INTO holdings (id, code, lots, buy_price) VALUES (12, '0050', 2, 150)");
         }
 
-        assertEquals(1, Flyway.configure().dataSource(url, "sa", "").load().migrate().migrationsExecuted);
+        assertEquals(2, Flyway.configure().dataSource(url, "sa", "").load().migrate().migrationsExecuted);
         try (var connection = DriverManager.getConnection(url, "sa", "");
              var statement = connection.createStatement()) {
             try (var rows = statement.executeQuery("SELECT id, code, lots, buy_price FROM holdings")) {
@@ -32,9 +32,15 @@ class TradeMigrationTest {
                 assertEquals(2, rows.getInt("lots"));
                 assertEquals("150.00", rows.getBigDecimal("buy_price").toPlainString());
             }
-            try (var trades = statement.executeQuery("SELECT COUNT(*) FROM holding_trades")) {
+            try (var trades = statement.executeQuery(
+                    "SELECT holding_id, side, trade_date, shares, unit_price FROM holding_trades")) {
                 assertTrue(trades.next());
-                assertEquals(0, trades.getInt(1));
+                assertEquals(12, trades.getLong("holding_id"));
+                assertEquals("OPENING", trades.getString("side"));
+                org.junit.jupiter.api.Assertions.assertNull(trades.getDate("trade_date"));
+                assertEquals(2000, trades.getLong("shares"));
+                assertEquals("150.00", trades.getBigDecimal("unit_price").toPlainString());
+                org.junit.jupiter.api.Assertions.assertFalse(trades.next());
             }
         }
     }

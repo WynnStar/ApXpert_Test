@@ -19,12 +19,12 @@ public final class TradeLedger {
         BigDecimal cost = ZERO_MONEY;
         BigDecimal realized = ZERO_MONEY;
 
-        for (Trade trade : trades.stream().sorted(Comparator.comparing(Trade::tradeDate)).toList()) {
+        for (Trade trade : trades.stream().sorted(Comparator.comparing(Trade::tradeDate, Comparator.nullsFirst(Comparator.naturalOrder()))).toList()) {
             BigDecimal quantity = BigDecimal.valueOf(trade.shares());
             BigDecimal amount = trade.unitPrice().multiply(quantity).setScale(2, RoundingMode.UNNECESSARY);
             BigDecimal fee = TradeCharges.fee(amount);
 
-            if (trade.side() == Trade.Side.BUY) {
+            if (trade.side() != Trade.Side.SELL) {
                 shares = Math.addExact(shares, trade.shares());
                 cost = cost.add(amount).add(fee);
                 continue;

@@ -23,7 +23,7 @@ public final class ProfitCalculator {
         return new PositionProfit(totalCost, marketValue, pnl, returnPercentage(pnl, totalCost));
     }
 
-    static BigDecimal returnPercentage(BigDecimal pnl, BigDecimal totalCost) {
+    public static BigDecimal returnPercentage(BigDecimal pnl, BigDecimal totalCost) {
         if (totalCost.signum() == 0) {
             return new BigDecimal("0.00");
         }

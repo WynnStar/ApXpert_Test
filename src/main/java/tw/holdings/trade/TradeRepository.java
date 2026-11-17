@@ -23,10 +23,14 @@ class TradeRepository {
     List<Trade> findByHolding(long id) {
         return jdbc.query("""
                 SELECT side, trade_date, shares, unit_price FROM holding_trades
-                WHERE holding_id = ? ORDER BY trade_date, id
+                WHERE holding_id = ? ORDER BY trade_date NULLS FIRST, id
                 """, (row, index) -> new Trade(Trade.Side.valueOf(row.getString("side")),
                 row.getObject("trade_date", LocalDate.class), row.getLong("shares"),
                 row.getBigDecimal("unit_price")), id);
+    }
+
+    void removeOpening(long id) {
+        jdbc.update("DELETE FROM holding_trades WHERE holding_id = ? AND side = 'OPENING'", id);
     }
 
     void insert(long id, Trade trade) {

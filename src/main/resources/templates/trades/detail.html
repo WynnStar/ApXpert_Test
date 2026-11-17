@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-Hant" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>持股交易紀錄</title>
+    <link rel="stylesheet" th:href="@{/css/trade-profit.css}">
+</head>
+<body>
+<main th:with="holding=${history.holding}">
+    <p><a th:href="@{/v2/holdings}">回新版持股清單</a></p>
+    <h1 th:text="|${holding.code} ${holding.name ?: ''} 交易紀錄|"></h1>
+    <p th:if="${notice}" th:text="${notice}" role="status"></p>
+    <dl>
+        <dt>總股數</dt><dd th:text="${holding.shares}"></dd>
+        <dt>每股平均成本（含費）</dt><dd th:text="${holding.displayAverageCost() ?: '—'}"></dd>
+        <dt>已實現損益</dt><dd><span th:replace="~{trades/profit :: money(${holding.realizedPnl})}"></span></dd>
+        <dt>未實現損益</dt><dd><span th:replace="~{trades/profit :: money(${holding.unrealizedPnl})}"></span></dd>
+    </dl>
+
+    <table>
+        <caption>交易紀錄</caption>
+        <thead><tr><th>日期</th><th>方向</th><th>股數</th><th>每股價格</th></tr></thead>
+        <tbody>
+        <tr th:each="entry : ${history.trades}">
+            <td th:text="${entry.tradeDate ?: '—'}"></td>
+            <td th:text="${entry.side == 'OPENING' ? '期初持股' : (entry.side == 'BUY' ? '買進' : '賣出')}"></td>
+            <td th:text="${entry.shares}"></td>
+            <td th:text="${entry.unitPrice}"></td>
+        </tr>
+        </tbody>
+    </table>
+
+    <h2>登記交易</h2>
+    <form th:action="@{/v2/holdings/{id}/trades(id=${holding.id})}" th:object="${trade}" method="post">
+        <p><label>方向 <select th:field="*{side}" required>
+            <option value="">請選擇</option><option value="BUY">買進</option><option value="SELL">賣出</option>
+        </select></label></p>
+        <div th:replace="~{trades/form :: terms}"></div>
+        <p th:unless="${holding.v2Managed}">
+            <label><input type="checkbox" th:field="*{confirmV2}" required>
+                我確認送出這筆交易後，此股票將由 2.0 管理，App 1.0 的清單與總計將不包含它。
+            </label>
+        </p>
+        <button type="submit">儲存交易</button>
+    </form>
+</main>
+</body>
+</html>
