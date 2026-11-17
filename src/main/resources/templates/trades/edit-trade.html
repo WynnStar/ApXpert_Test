@@ -14,12 +14,17 @@
         <ul th:if="${#fields.hasAnyErrors()}" role="alert">
             <li th:each="error : ${#fields.allErrors()}" th:text="${error}"></li>
         </ul>
-        <p th:unless="${opening}"><label>交易日期
+        <p th:if="${tradeDateLocked}">
+            交易日期 <time th:datetime="${originalTradeDate}" th:text="${originalTradeDate}"></time>（超過五年，日期不可修改）
+            <input type="hidden" name="tradeDate" th:value="${originalTradeDate}">
+        </p>
+        <p th:if="${!opening and !tradeDateLocked}"><label>交易日期
             <input type="date" th:field="*{tradeDate}" th:min="${minTradeDate}" th:max="${maxTradeDate}"
                    aria-describedby="edit-date-hint" required>
         </label></p>
-        <p th:unless="${opening}" id="edit-date-hint"
-           th:text="${firstListingDate != null ? '首次上市或上櫃日為 ' + firstListingDate : '首次掛牌日未能確認'}"></p>
+        <p th:if="${!opening and !tradeDateLocked}" id="edit-date-hint"
+           th:text="${firstListingDate != null ? '首次上市或上櫃日為 ' + firstListingDate + '，最早可填 ' + minTradeDate
+                    : '首次掛牌日未能確認，最早可填 ' + minTradeDate}"></p>
         <p><label>股數 <input type="number" th:field="*{shares}" min="1" step="1" required></label></p>
         <p><label>每股價格 <input type="number" th:field="*{unitPrice}" min="0.01" step="0.01" required></label></p>
         <p th:unless="${target.v2Managed}">

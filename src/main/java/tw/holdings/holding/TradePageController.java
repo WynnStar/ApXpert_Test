@@ -42,7 +42,7 @@ class TradePageController {
     @GetMapping("/trade-date-range")
     @ResponseBody
     TradeDateRules.Range tradeDateRange(@RequestParam String code) {
-        return dates.newTradeRange(code);
+        return dates.range(code);
     }
 
     @GetMapping("/{id}")
@@ -125,7 +125,11 @@ class TradePageController {
 
     private String showTradeEdit(TradeHoldingService.TradeTarget target, Model model) {
         model.addAttribute("target", target);
-        addDateRange(dates.editRange(target.holding().code()), model);
+        var range = dates.range(target.holding().code());
+        addDateRange(range, model);
+        LocalDate originalDate = target.entry().trade().tradeDate();
+        model.addAttribute("originalTradeDate", originalDate);
+        model.addAttribute("tradeDateLocked", dates.editDateLocked(originalDate, range.maxDate()));
         return "trades/edit-trade";
     }
 
@@ -190,7 +194,7 @@ class TradePageController {
         var holdings = service.list();
         model.addAttribute("holdings", holdings);
         TradeInput form = (TradeInput) model.asMap().get("trade");
-        addDateRange(dates.newTradeRange(form.code()), model);
+        addDateRange(dates.range(form.code()), model);
         model.addAttribute("summary", TradePortfolioSummary.from(holdings));
         return "trades/list";
     }
@@ -198,7 +202,7 @@ class TradePageController {
     private String showDetail(long id, Model model) {
         var history = service.history(id);
         model.addAttribute("history", history);
-        addDateRange(dates.newTradeRange(history.holding().code()), model);
+        addDateRange(dates.range(history.holding().code()), model);
         return "trades/detail";
     }
 
