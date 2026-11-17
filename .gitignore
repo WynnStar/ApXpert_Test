@@ -1,0 +1,44 @@
+# Java build output
+HELP.md
+target/
+build/
+.gradle/
+*.class
+bin/
+
+# IDE
+.metadata/
+.idea/
+*.iml
+*.ipr
+*.iws
+/out/
+.project
+.classpath
+.settings/
+.vscode/
+.claude/
+/Servers/
+
+# Logs and local temporary files
+*.log
+hs_err_pid*
+replay_pid*
+.DS_Store
+Thumbs.db
+*.swp
+
+# Frontend
+/frontend/node_modules/
+/frontend/dist/
+
+
+# Local environment and runtime data
+.env
+.env.*
+!.env.example
+*.key
+/backend/data/
+/database/local/
+
+
