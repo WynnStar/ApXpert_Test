@@ -20,13 +20,18 @@ record TradeHoldingView(long id, String code, String name, Market market, boolea
                         long shares, BigDecimal remainingCost, BigDecimal averageCost,
                         BigDecimal realizedPnl, BigDecimal unrealizedPnl, BigDecimal currentPrice,
                         @JsonFormat(shape = JsonFormat.Shape.STRING) LocalDate priceDate,
-                        @JsonIgnore Delisting delisting) {
+                        @JsonIgnore BigDecimal realizedCost, @JsonIgnore Delisting delisting) {
     public BigDecimal displayAverageCost() {
         return shares == 0 ? null : remainingCost.divide(BigDecimal.valueOf(shares), 2, RoundingMode.HALF_UP);
     }
 
     public BigDecimal unrealizedReturnPct() {
-        return unrealizedPnl == null ? null : ProfitCalculator.returnPercentage(unrealizedPnl, remainingCost);
+        return unrealizedPnl == null || remainingCost.signum() == 0 ? null
+                : ProfitCalculator.returnPercentage(unrealizedPnl, remainingCost);
+    }
+
+    public BigDecimal realizedReturnPct() {
+        return realizedCost.signum() == 0 ? null : ProfitCalculator.returnPercentage(realizedPnl, realizedCost);
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)

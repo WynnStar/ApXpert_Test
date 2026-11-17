@@ -18,6 +18,7 @@ public final class TradeLedger {
         long shares = 0;
         BigDecimal cost = ZERO_MONEY;
         BigDecimal realized = ZERO_MONEY;
+        BigDecimal realizedCost = ZERO_MONEY;
 
         for (Trade trade : trades.stream().sorted(Comparator.comparing(Trade::tradeDate, Comparator.nullsFirst(Comparator.naturalOrder()))).toList()) {
             BigDecimal quantity = BigDecimal.valueOf(trade.shares());
@@ -40,8 +41,9 @@ public final class TradeLedger {
                     .subtract(allocated));
             shares -= trade.shares();
             cost = cost.subtract(allocated);
+            realizedCost = realizedCost.add(allocated);
         }
 
-        return new TradePosition(shares, cost, realized);
+        return new TradePosition(shares, cost, realized, realizedCost);
     }
 }

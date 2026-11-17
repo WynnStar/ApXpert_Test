@@ -5,7 +5,8 @@ import java.math.RoundingMode;
 
 import tw.holdings.profit.TradeCharges;
 
-public record TradePosition(long shares, BigDecimal remainingCost, BigDecimal realizedPnl) {
+public record TradePosition(long shares, BigDecimal remainingCost, BigDecimal realizedPnl,
+                            BigDecimal realizedCost) {
     public BigDecimal averageCost() {
         if (shares == 0) {
             return null;

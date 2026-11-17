@@ -23,10 +23,12 @@
             <dd th:text="|${#numbers.formatDecimal(summary.marketValue, 1, 'COMMA', 2, 'POINT')} 元|"></dd>
             <dt>總未實現損益</dt>
             <dd><span th:replace="~{trades/profit :: money(${summary.unrealizedPnl})}"></span></dd>
-            <dt>總收益率</dt>
-            <dd><span th:replace="~{trades/profit :: rate(${summary.returnPct})}"></span></dd>
+            <dt>總未實現損益率</dt>
+            <dd><span th:replace="~{trades/profit :: rate(${summary.unrealizedReturnPct}, '—')}"></span></dd>
             <dt>總已實現損益</dt>
             <dd><span th:replace="~{trades/profit :: money(${summary.realizedPnl})}"></span></dd>
+            <dt>總已實現損益率</dt>
+            <dd><span th:replace="~{trades/profit :: rate(${summary.realizedReturnPct}, '—')}"></span></dd>
         </dl>
         <p th:if="${summary.quoteMissing > 0}"
            th:text="|有 ${summary.quoteMissing} 筆持股未取得收盤價。這些持股仍計入總成本，市值與未實現損益暫不計入。|"></p>
@@ -37,7 +39,7 @@
         <thead>
         <tr>
             <th>股票代號</th><th>股票名稱</th><th>市場</th><th>股數</th><th>每股平均成本（含費）</th>
-            <th>收盤價</th><th>收盤日期</th><th>未實現損益</th><th>收益率</th><th>已實現損益</th><th>操作</th>
+            <th>收盤價</th><th>收盤日期</th><th>未實現損益</th><th>未實現損益率</th><th>已實現損益</th><th>已實現損益率</th><th>操作</th>
         </tr>
         </thead>
         <tbody>
@@ -59,8 +61,9 @@
                     <span th:replace="~{trades/profit :: money(${holding.unrealizedPnl})}"></span>
                 </th:block>
             </td>
-            <td><span th:replace="~{trades/profit :: rate(${holding.unrealizedReturnPct()})}"></span></td>
+            <td><span th:replace="~{trades/profit :: rate(${holding.unrealizedReturnPct()}, ${holding.shares == 0 ? '—' : '未取得'})}"></span></td>
             <td><span th:replace="~{trades/profit :: money(${holding.realizedPnl})}"></span></td>
+            <td><span th:replace="~{trades/profit :: rate(${holding.realizedReturnPct()}, '—')}"></span></td>
             <td>
                 <a th:href="@{/v2/holdings/{id}(id=${holding.id})}">交易紀錄</a>
                 <a th:href="@{/v2/holdings/{id}/delete(id=${holding.id})}">刪除</a>
