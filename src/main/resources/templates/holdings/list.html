@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-Hant" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>持股清單｜持股記帳</title>
+    <script defer th:src="@{/js/holding-validation.js}"></script>
+</head>
+<body>
+<main>
+    <p><a th:href="@{/}">回首頁</a></p>
+    <h1>持股清單</h1>
+    <p th:if="${notice}" th:text="${notice}" role="status"></p>
+
+    <p th:if="${#lists.isEmpty(holdings)}">目前沒有持股。</p>
+    <table th:unless="${#lists.isEmpty(holdings)}">
+        <thead>
+        <tr><th>股票代號</th><th>張數</th><th>買進價（每股）</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+        <tr th:each="holding : ${holdings}">
+            <td th:text="${holding.code}"></td>
+            <td th:text="${holding.lots}"></td>
+            <td th:text="${holding.buyPrice.toPlainString()}"></td>
+            <td>
+                <a th:href="@{/holdings/{id}/edit(id=${holding.id})}">修改</a>
+                <form th:action="@{/holdings/{id}/delete(id=${holding.id})}" method="post">
+                    <button type="submit" th:attr="aria-label=|刪除 ${holding.code}|">刪除</button>
+                </form>
+            </td>
+        </tr>
+        </tbody>
+    </table>
+
+    <h2>新增持股</h2>
+    <form th:action="@{/holdings}" th:object="${form}" method="post">
+        <p>
+            <label for="code">股票代號</label>
+            <input type="text" th:field="*{code}" required minlength="4" maxlength="6" pattern="[0-9]{4}[0-9A-Z]{0,2}" placeholder="例如 0050" data-validation="code" data-feedback="code-feedback" aria-describedby="code-feedback code-feedback-server">
+            <span id="code-feedback-server" th:errors="*{code}" role="alert"></span>
+            <span id="code-feedback" aria-live="polite" hidden></span>
+        </p>
+        <p>
+            <label for="terms.lots">張數（1 張 = 1,000 股）</label>
+            <input type="number" th:field="*{terms.lots}" required min="1" max="999" step="1" data-validation="lots" data-feedback="lots-feedback" aria-describedby="lots-feedback lots-feedback-server">
+            <span id="lots-feedback-server" th:errors="*{terms.lots}" role="alert"></span>
+            <span id="lots-feedback" aria-live="polite" hidden></span>
+        </p>
+        <p>
+            <label for="terms.buyPrice">買進價（每股）</label>
+            <input type="number" th:field="*{terms.buyPrice}" required min="0.01" step="0.01" data-validation="price" data-feedback="price-feedback" aria-describedby="price-feedback price-feedback-server">
+            <span id="price-feedback-server" th:errors="*{terms.buyPrice}" role="alert"></span>
+            <span id="price-feedback" aria-live="polite" hidden></span>
+        </p>
+        <button type="submit">新增</button>
+    </form>
+</main>
+</body>
+</html>

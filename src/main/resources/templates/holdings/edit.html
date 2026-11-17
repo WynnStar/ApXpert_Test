@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-Hant" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>修改持股｜持股記帳</title>
+    <script defer th:src="@{/js/holding-validation.js}"></script>
+</head>
+<body>
+<main>
+    <p><a th:href="@{/holdings}">回持股清單</a></p>
+    <h1 th:text="|修改持股 ${holding.code}|">修改持股</h1>
+    <form th:action="@{/holdings/{id}/edit(id=${holding.id})}" th:object="${form}" method="post">
+        <p>
+            <label for="lots">張數（1 張 = 1,000 股）</label>
+            <input type="number" th:field="*{lots}" required min="1" max="999" step="1" data-validation="lots" data-feedback="lots-feedback" aria-describedby="lots-feedback lots-feedback-server">
+            <span id="lots-feedback-server" th:errors="*{lots}" role="alert"></span>
+            <span id="lots-feedback" aria-live="polite" hidden></span>
+        </p>
+        <p>
+            <label for="buyPrice">買進價（每股）</label>
+            <input type="number" th:field="*{buyPrice}" required min="0.01" step="0.01" data-validation="price" data-feedback="price-feedback" aria-describedby="price-feedback price-feedback-server">
+            <span id="price-feedback-server" th:errors="*{buyPrice}" role="alert"></span>
+            <span id="price-feedback" aria-live="polite" hidden></span>
+        </p>
+        <button type="submit">儲存修改</button>
+    </form>
+</main>
+</body>
+</html>
