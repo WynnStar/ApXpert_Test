@@ -14,6 +14,8 @@ import tw.holdings.quote.QuoteResult;
 import tw.holdings.quote.QuoteService;
 import tw.holdings.trade.InsufficientSharesException;
 import tw.holdings.trade.Trade;
+import tw.holdings.trade.TradeEntry;
+import tw.holdings.trade.TradeHoldingNotFoundException;
 import tw.holdings.trade.TradeLedger;
 import tw.holdings.trade.TradeLedgerService;
 
@@ -92,6 +94,14 @@ class TradeHoldingService {
         }
     }
 
+    void move(long id, long tradeId, TradeLedgerService.Direction direction) {
+        try {
+            ledger.move(id, tradeId, direction);
+        } catch (TradeHoldingNotFoundException error) {
+            throw new HoldingNotFoundException(id);
+        }
+    }
+
     private void validateTradeDate(Trade trade, LocalDate currentDate) {
         if (trade.tradeDate().isAfter(currentDate)) {
             throw new HoldingApiController.ApiValidationException("交易日期不能晚於今天");
@@ -99,8 +109,8 @@ class TradeHoldingService {
     }
 
     private TradeHoldingView.History history(Holding holding) {
-        var trades = ledger.trades(holding.id());
-        var position = TradeLedger.replay(holding.code(), trades);
+        var entries = ledger.entries(holding.id());
+        var position = TradeLedger.replay(holding.code(), entries.stream().map(TradeEntry::trade).toList());
         QuoteResult quote = quotes.forDisplay(holding.code(), holding.market());
         boolean found = quote != null && quote.status() == QuoteResult.Status.FOUND;
         var close = found ? quote.close() : null;
@@ -108,6 +118,6 @@ class TradeHoldingService {
                 found ? quote.name() : holding.name(), found ? quote.market() : holding.market(), holding.isV2Managed(),
                 position.shares(), position.remainingCost(), position.averageCost(), position.realizedPnl(),
                 position.unrealizedPnl(holding.code(), close), close, found ? quote.priceDate() : null);
-        return new TradeHoldingView.History(view, trades.stream().map(TradeHoldingView.TradeDetail::from).toList());
+        return new TradeHoldingView.History(view, TradeHoldingView.TradeDetail.from(entries));
     }
 }

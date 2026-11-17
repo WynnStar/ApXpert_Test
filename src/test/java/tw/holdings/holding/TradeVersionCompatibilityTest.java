@@ -29,6 +29,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.flash;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -276,6 +277,66 @@ class TradeVersionCompatibilityTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.message", not(containsString("請先補登"))));
         mvc.perform(get(trades)).andExpect(jsonPath("$.length()").value(2));
+    }
+
+    @Test
+    void webReordersSameDayTradesAndRejectsOrdersThatWouldOversell() throws Exception {
+        var created = mvc.perform(post(V2).contentType(MediaType.APPLICATION_JSON).content("""
+                {"code":"2330","trade_date":"2026-11-16","shares":100,"unit_price":10}
+                """)).andExpect(status().isCreated()).andReturn();
+        long id = json.readTree(created.getResponse().getContentAsByteArray()).get("id").longValue();
+        String api = V2 + "/" + id;
+        String page = "/v2/holdings/" + id;
+        String trades = api + "/trades";
+
+        mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON).content("""
+                {"side":"BUY","trade_date":"2026-11-16","shares":100,"unit_price":20}
+                """)).andExpect(status().isCreated());
+        mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON).content("""
+                {"side":"SELL","trade_date":"2026-11-16","shares":100,"unit_price":30}
+                """)).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.remaining_cost").value(1520))
+                .andExpect(jsonPath("$.realized_pnl").value(1451));
+        mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON).content("""
+                {"side":"BUY","trade_date":"2026-11-17","shares":100,"unit_price":40}
+                """)).andExpect(status().isCreated());
+
+        long sellId = jdbc.queryForObject("SELECT id FROM holding_trades WHERE holding_id = ? AND side = 'SELL'",
+                Long.class, id);
+        String move = page + "/trades/" + sellId + "/move";
+        mvc.perform(get(page)).andExpect(status().isOk())
+                .andExpect(content().string(containsString("action=\"" + move + "\"")))
+                .andExpect(content().string(containsString(">上移</button>")))
+                .andExpect(content().string(containsString(">下移</button>")));
+        mvc.perform(post(move).param("direction", "DOWN")).andExpect(status().is3xxRedirection())
+                .andExpect(flash().attribute("orderError", containsString("同一天")));
+        mvc.perform(post(move).param("direction", "UP")).andExpect(status().is3xxRedirection())
+                .andExpect(flash().attribute("notice", "已調整同日交易順序"));
+        var rejected = mvc.perform(post(move).param("direction", "UP")).andExpect(status().is3xxRedirection())
+                .andExpect(flash().attribute("orderError", containsString("調整後會發生超賣"))).andReturn();
+        mvc.perform(get(page).flashAttrs(rejected.getFlashMap())).andExpect(status().isOk())
+                .andExpect(content().string(containsString("調整後會發生超賣")));
+
+        mvc.perform(get(trades)).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].unit_price").value(10))
+                .andExpect(jsonPath("$[1].side").value("SELL"))
+                .andExpect(jsonPath("$[2].unit_price").value(20))
+                .andExpect(jsonPath("$[3].unit_price").value(40))
+                .andExpect(jsonPath("$[1].id").doesNotExist())
+                .andExpect(jsonPath("$[1].can_move_up").doesNotExist());
+        mvc.perform(get(api)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.shares").value(200))
+                .andExpect(jsonPath("$.remaining_cost").value(6040))
+                .andExpect(jsonPath("$.realized_pnl").value(1951));
+
+        mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON).content("""
+                {"side":"BUY","trade_date":"2026-11-16","shares":100,"unit_price":21}
+                """)).andExpect(status().isCreated());
+        mvc.perform(get(trades)).andExpect(status().isOk())
+                .andExpect(jsonPath("$[1].side").value("SELL"))
+                .andExpect(jsonPath("$[2].unit_price").value(20))
+                .andExpect(jsonPath("$[3].unit_price").value(21))
+                .andExpect(jsonPath("$[4].unit_price").value(40));
     }
 
     private long createLegacy(String body) throws Exception {

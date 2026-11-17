@@ -20,13 +20,21 @@ class TradeRepository {
                 (row, index) -> row.getString("code"), id).stream().findFirst();
     }
 
-    List<Trade> findByHolding(long id) {
+    List<TradeEntry> findByHolding(long id) {
         return jdbc.query("""
-                SELECT side, trade_date, shares, unit_price FROM holding_trades
-                WHERE holding_id = ? ORDER BY trade_date NULLS FIRST, id
-                """, (row, index) -> new Trade(Trade.Side.valueOf(row.getString("side")),
-                row.getObject("trade_date", LocalDate.class), row.getLong("shares"),
-                row.getBigDecimal("unit_price")), id);
+                SELECT id, sort_order, side, trade_date, shares, unit_price FROM holding_trades
+                WHERE holding_id = ? ORDER BY trade_date NULLS FIRST, sort_order, id
+                """, (row, index) -> new TradeEntry(row.getLong("id"), row.getLong("sort_order"),
+                new Trade(Trade.Side.valueOf(row.getString("side")), row.getObject("trade_date", LocalDate.class),
+                        row.getLong("shares"), row.getBigDecimal("unit_price"))), id);
+    }
+
+    void swapOrder(long holdingId, TradeEntry first, TradeEntry second) {
+        jdbc.update("""
+                UPDATE holding_trades
+                SET sort_order = CASE WHEN id = ? THEN ? ELSE ? END
+                WHERE holding_id = ? AND id IN (?, ?)
+                """, first.id(), second.sortOrder(), first.sortOrder(), holdingId, first.id(), second.id());
     }
 
     void removeOpening(long id) {
@@ -35,8 +43,12 @@ class TradeRepository {
 
     void insert(long id, Trade trade) {
         jdbc.update("""
-                INSERT INTO holding_trades (holding_id, side, trade_date, shares, unit_price)
-                VALUES (?, ?, ?, ?, ?)
-                """, id, trade.side().name(), trade.tradeDate(), trade.shares(), trade.unitPrice());
+                INSERT INTO holding_trades (holding_id, side, trade_date, shares, unit_price, sort_order)
+                VALUES (?, ?, ?, ?, ?, (
+                    SELECT COALESCE(MAX(sort_order), 0) + 1 FROM holding_trades
+                    WHERE holding_id = ? AND trade_date = ?
+                ))
+                """, id, trade.side().name(), trade.tradeDate(), trade.shares(), trade.unitPrice(),
+                id, trade.tradeDate());
     }
 }

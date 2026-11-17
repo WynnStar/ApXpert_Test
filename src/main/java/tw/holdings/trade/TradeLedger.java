@@ -13,7 +13,7 @@ public final class TradeLedger {
     private TradeLedger() {
     }
 
-    /** 同一天的交易依輸入順序處理，資料庫以交易 ID 提供穩定順序。 */
+    /** 依交易日期回放。同日交易保留呼叫端提供的順序。 */
     public static TradePosition replay(String code, List<Trade> trades) {
         long shares = 0;
         BigDecimal cost = ZERO_MONEY;
