@@ -193,6 +193,36 @@ class TradeVersionCompatibilityTest {
         org.junit.jupiter.api.Assertions.assertTrue(page.matches("(?s).*<td>6488</td>.*?未取得.*?未取得.*?未取得.*"));
     }
 
+    @Test
+    void closedHoldingKeepsItsQuoteWithoutAddingMarketValueOrMissingQuoteCount() throws Exception {
+        long id = createLegacy(OLD_BUY);
+        mvc.perform(post(V2 + "/" + id + "/trades").contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"side":"SELL","trade_date":"2026-11-17","shares":2000,
+                                 "unit_price":160,"confirm_v2":true}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.shares").value(0))
+                .andExpect(jsonPath("$.current_price").value(170.00))
+                .andExpect(jsonPath("$.price_date").value("2026-11-16"))
+                .andExpect(jsonPath("$.remaining_cost").value(0))
+                .andExpect(jsonPath("$.realized_pnl").value(18797))
+                .andExpect(jsonPath("$.unrealized_pnl").value(0));
+        mvc.perform(get(V2)).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].shares").value(0))
+                .andExpect(jsonPath("$[0].price_date").value("2026-11-16"));
+        mvc.perform(get("/v2/holdings")).andExpect(status().isOk())
+                .andExpect(content().string(containsString("<td>170.00</td>")))
+                .andExpect(content().string(containsString("<td>2026-11-16</td>")))
+                .andExpect(content().string(org.hamcrest.Matchers.matchesPattern(
+                        "(?s).*<dt>總市值</dt>\\s*<dd>0.00 元</dd>.*")));
+
+        when(quotes.lookup("0050", Market.TWSE)).thenReturn(
+                new QuoteResult(QuoteResult.Status.UNAVAILABLE, null, null, null, null));
+        mvc.perform(get("/v2/holdings")).andExpect(status().isOk())
+                .andExpect(content().string(not(containsString("筆持股未取得收盤價"))));
+    }
+
     private long createLegacy(String body) throws Exception {
         var result = mvc.perform(post(V1).contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated()).andReturn();
