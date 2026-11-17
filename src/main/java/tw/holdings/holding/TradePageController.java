@@ -74,6 +74,50 @@ class TradePageController {
         }
     }
 
+    @GetMapping("/{id}/delete")
+    String confirmDelete(@PathVariable long id, Model model) {
+        model.addAttribute("holding", service.deleteTarget(id));
+        return "trades/delete";
+    }
+
+    @PostMapping("/{id}/delete")
+    String delete(@PathVariable long id, RedirectAttributes redirect) {
+        service.delete(id);
+        redirect.addFlashAttribute("notice", "已刪除整檔持股及交易紀錄");
+        return "redirect:/v2/holdings";
+    }
+
+    @GetMapping("/{id}/trades/{tradeId}/delete")
+    String confirmTradeDelete(@PathVariable long id, @PathVariable long tradeId, Model model) {
+        model.addAttribute("target", service.tradeDeleteTarget(id, tradeId));
+        return "trades/delete-trade";
+    }
+
+    @PostMapping("/{id}/trades/{tradeId}/delete")
+    String deleteTrade(@PathVariable long id, @PathVariable long tradeId, @RequestParam boolean lastTrade,
+                       RedirectAttributes redirect) {
+        String detail = "redirect:/v2/holdings/" + id;
+        try {
+            return switch (service.deleteTrade(id, tradeId, lastTrade)) {
+                case TRADE_DELETED -> {
+                    redirect.addFlashAttribute("notice", "已刪除交易紀錄");
+                    yield detail;
+                }
+                case HOLDING_DELETED -> {
+                    redirect.addFlashAttribute("notice", "已刪除整檔持股及交易紀錄");
+                    yield "redirect:/v2/holdings";
+                }
+                case CONFIRM_AGAIN -> {
+                    redirect.addFlashAttribute("deleteError", "交易筆數已變更，請重新確認刪除範圍。");
+                    yield detail + "/trades/" + tradeId + "/delete";
+                }
+            };
+        } catch (InsufficientSharesException error) {
+            redirect.addFlashAttribute("deleteError", "無法刪除。刪除後會發生超賣：" + error.getMessage());
+            return detail;
+        }
+    }
+
     @PostMapping("/{id}/trades/{tradeId}/move")
     String move(@PathVariable long id, @PathVariable long tradeId, @RequestParam Direction direction,
                 RedirectAttributes redirect) {
@@ -88,9 +132,9 @@ class TradePageController {
         return "redirect:/v2/holdings/" + id;
     }
 
-    @ExceptionHandler(HoldingNotFoundException.class)
+    @ExceptionHandler({HoldingNotFoundException.class, HoldingTradeNotFoundException.class})
     @ResponseStatus(HttpStatus.NOT_FOUND)
-    String notFound(HoldingNotFoundException exception, Model model) {
+    String notFound(RuntimeException exception, Model model) {
         model.addAttribute("message", exception.getMessage());
         return "holdings/not-found";
     }

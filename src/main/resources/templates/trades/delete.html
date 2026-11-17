@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-Hant" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>確認刪除持股｜持股記帳 2.0</title>
+</head>
+<body>
+<main>
+    <h1 th:text="|確認刪除 ${holding.code} ${holding.name ?: ''}|">確認刪除持股</h1>
+    <p>刪除整檔持股會一併移除期初持股、所有買賣紀錄和已實現損益紀錄。此操作無法復原。</p>
+    <form th:action="@{/v2/holdings/{id}/delete(id=${holding.id})}" method="post">
+        <a th:href="@{/v2/holdings}">取消</a>
+        <button type="submit">確認刪除</button>
+    </form>
+</main>
+</body>
+</html>

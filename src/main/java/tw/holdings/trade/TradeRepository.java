@@ -37,6 +37,14 @@ class TradeRepository {
                 """, first.id(), second.sortOrder(), first.sortOrder(), holdingId, first.id(), second.id());
     }
 
+    void deleteTrade(long holdingId, long tradeId) {
+        jdbc.update("DELETE FROM holding_trades WHERE holding_id = ? AND id = ?", holdingId, tradeId);
+    }
+
+    void deleteByHolding(long id) {
+        jdbc.update("DELETE FROM holding_trades WHERE holding_id = ?", id);
+    }
+
     void removeOpening(long id) {
         jdbc.update("DELETE FROM holding_trades WHERE holding_id = ? AND side = 'OPENING'", id);
     }
