@@ -1,15 +1,9 @@
 package tw.holdings.quote;
 
-import java.io.IOException;
 import java.time.Clock;
 import java.time.LocalDate;
-import java.time.YearMonth;
 import java.time.ZonedDateTime;
-import java.util.Comparator;
-import java.util.EnumSet;
-import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -27,16 +21,16 @@ import org.springframework.stereotype.Service;
 public class QuoteService {
     private static final Logger LOGGER = LoggerFactory.getLogger(QuoteService.class);
     private final QuoteCacheRepository cache;
-    private final List<QuoteSource> sources;
+    private final OfficialQuoteLookup officialQuotes;
     private final Clock clock;
     private final MarketStatusService markets;
     private final ExecutorService quoteWorkers;
     private final ConcurrentHashMap<String, CompletableFuture<QuoteResult>> inFlight = new ConcurrentHashMap<>();
 
-    QuoteService(QuoteCacheRepository cache, List<QuoteSource> sources, Clock clock,
+    QuoteService(QuoteCacheRepository cache, OfficialQuoteLookup officialQuotes, Clock clock,
                  ExecutorService quoteWorkers, MarketStatusService markets) {
         this.cache = cache;
-        this.sources = sources.stream().sorted(Comparator.comparing(QuoteSource::market)).toList();
+        this.officialQuotes = officialQuotes;
         this.clock = clock;
         this.markets = markets;
         this.quoteWorkers = quoteWorkers;
@@ -157,7 +151,7 @@ public class QuoteService {
                 : hint != null ? hint : last == null ? null : last.market();
         boolean postClose = QuoteRefreshPolicy.isPostClose(now);
         boolean onlyCurrentMonth = postClose && last != null && last.close() != null;
-        QuoteResult result = lookupOfficial(code, market, day, onlyCurrentMonth);
+        QuoteResult result = officialQuotes.lookup(code, market, day, onlyCurrentMonth);
         if (listing != null && result.priceDate() != null && result.priceDate().isBefore(listing.date())) {
             result = QuoteResult.found(listing.name(), market, null);
         }
@@ -211,49 +205,5 @@ public class QuoteService {
 
     private ZonedDateTime taipeiNow() {
         return clock.instant().atZone(QuoteRefreshPolicy.TAIPEI);
-    }
-
-    private QuoteResult lookupOfficial(String code, Market knownMarket, LocalDate day, boolean onlyCurrentMonth) {
-        Set<Market> unavailable = EnumSet.noneOf(Market.class);
-        QuoteResult identity = null;
-        YearMonth current = YearMonth.from(day);
-        for (YearMonth month : (onlyCurrentMonth ? List.of(current) : List.of(current, current.minusMonths(1)))) {
-            for (QuoteSource source : sources) {
-                Market preferred = identity == null ? knownMarket : identity.market();
-                if (unavailable.contains(source.market()) || (preferred != null && preferred != source.market())) {
-                    continue;
-                }
-                QuoteResult result = fetch(source, code, month, day);
-                switch (result.status()) {
-                    case FOUND -> {
-                        if (result.close() != null) {
-                            return result;
-                        }
-                        identity = result;
-                    }
-                    case UNAVAILABLE -> unavailable.add(source.market());
-                    case NOT_FOUND -> {
-                        // 查無當月資料時可能是月初休市，仍須檢查上個月。
-                    }
-                }
-            }
-        }
-        if (identity != null) {
-            return identity;
-        }
-        return unavailable.isEmpty() ? QuoteResult.notFound() : QuoteResult.unavailable();
-    }
-
-    private QuoteResult fetch(QuoteSource source, String code, YearMonth month, LocalDate day) {
-        try {
-            return source.fetch(code, month, day);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            return QuoteResult.unavailable();
-        } catch (IOException | RuntimeException exception) {
-            LOGGER.warn("Official quote unavailable: market={}, code={}, month={}, reason={}",
-                    source.market(), code, month, exception.getClass().getSimpleName());
-            return QuoteResult.unavailable();
-        }
     }
 }

@@ -35,6 +35,7 @@ class QuoteRefreshTest {
     @Autowired JdbcTemplate jdbc;
     private final TestClock clock = new TestClock();
     private final Source source = new Source();
+    private final OfficialQuoteLookup officialQuotes = new OfficialQuoteLookup(List.of(source));
     private final ArrayDeque<Runnable> queue = new ArrayDeque<>();
     private final ExecutorService workers = mock(ExecutorService.class);
     private QuoteCacheRepository cache;
@@ -44,7 +45,8 @@ class QuoteRefreshTest {
     void setup() {
         clock.set(TUESDAY, 10, 0);
         cache = new QuoteCacheRepository(jdbc);
-        quotes = new QuoteService(cache, List.of(source), clock, workers, new MarketStatusService(new MarketStatusRepository(jdbc), clock));
+        quotes = new QuoteService(cache, officialQuotes, clock, workers,
+                new MarketStatusService(new MarketStatusRepository(jdbc), clock));
         doAnswer(task -> { task.<Runnable>getArgument(0).run(); return null; })
                 .when(workers).execute(any(Runnable.class));
     }
@@ -137,7 +139,8 @@ class QuoteRefreshTest {
         assertEquals(4, source.calls);
 
         // 模擬應用程式換新實例，重試次數與最後行情仍從資料庫取得。
-        var restarted = new QuoteService(cache, List.of(source), clock, workers, new MarketStatusService(new MarketStatusRepository(jdbc), clock));
+        var restarted = new QuoteService(cache, officialQuotes, clock, workers,
+                new MarketStatusService(new MarketStatusRepository(jdbc), clock));
         restarted.refreshPendingCloses();
         assertEquals(YESTERDAY, restarted.forDisplay(CODE, Market.TWSE));
         assertEquals(4, source.calls);
