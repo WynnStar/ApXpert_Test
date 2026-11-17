@@ -16,8 +16,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -38,16 +40,16 @@ class MarketStatusBatchTest {
         when(official.delistings(eq(Market.TWSE), anyInt())).thenReturn(List.of(delisting));
         jdbc.update("INSERT INTO holdings(code, lots, buy_price) VALUES ('2888', 1, 10)");
 
-        batch(repository, official, history, day, 7).runIfDue();
+        batch(repository, official, history, day, 7).enqueue();
         verifyNoInteractions(official);
         var ready = batch(repository, official, history, day, 9);
-        ready.runIfDue();
-        ready.runIfDue();
+        ready.enqueue();
+        ready.enqueue();
         verify(official, times(1)).delistings(Market.TWSE, 2026);
         verify(history, times(1)).refresh(delisting);
 
         when(official.delistings(eq(Market.TWSE), anyInt())).thenThrow(new IOException("offline"));
-        batch(repository, official, history, day.plusDays(1), 8).runIfDue();
+        batch(repository, official, history, day.plusDays(1), 8).enqueue();
         var status = new MarketStatusService(repository, clock(day.plusDays(1), 8));
         assertEquals("已下市", status.delisting("2888").orElseThrow().label());
     }
@@ -65,8 +67,8 @@ class MarketStatusBatchTest {
         assertTrue(repository.claimDay(day));
 
         var restart = batch(repository, official, history, day, 9);
-        restart.runIfDue();
-        restart.runIfDue();
+        restart.enqueue();
+        restart.enqueue();
         verify(official, times(1)).delistings(Market.TPEX, 2016);
         verify(history, times(1)).refresh(delisting);
         var status = new MarketStatusService(repository, clock(day, 9));
@@ -95,8 +97,8 @@ class MarketStatusBatchTest {
         assertTrue(repository.claimDay(day));
 
         var restart = batch(repository, official, history, day, 9);
-        restart.runIfDue();
-        restart.runIfDue();
+        restart.enqueue();
+        restart.enqueue();
         var status = new MarketStatusService(repository, clock(day, 9));
         assertTrue(status.delisting("1597").isEmpty());
         assertTrue(status.delisting("1795").isEmpty());
@@ -132,7 +134,7 @@ class MarketStatusBatchTest {
                 new OfficialMarketClient.Listing("2809", Market.TPEX, day, "12345678", "代號重用"),
                 new OfficialMarketClient.Listing("6806", Market.TPEX, day, "12345678", "尚無舊身分")));
 
-        batch(repository, official, history, day, 8).runIfDue();
+        batch(repository, official, history, day, 8).enqueue();
         var status = new MarketStatusService(repository, clock(day, 8));
         assertTrue(status.delisting("2888").isEmpty());
         assertTrue(status.buyRestriction("2888", day).isEmpty());
@@ -188,8 +190,13 @@ class MarketStatusBatchTest {
     private MarketStatusBatch batch(MarketStatusRepository repository, OfficialMarketClient official,
                                     DelistedQuoteHistory history, LocalDate day, int hour) {
         var clock = clock(day, hour);
-        return new MarketStatusBatch(repository, new MarketStatusService(repository, clock), official, history,
-                clock, mock(ExecutorService.class));
+        var workers = mock(ExecutorService.class);
+        doAnswer(task -> {
+            task.<Runnable>getArgument(0).run();
+            return null;
+        }).when(workers).execute(any(Runnable.class));
+        var sync = new MarketStatusSyncService(repository, new MarketStatusService(repository, clock), official, history);
+        return new MarketStatusBatch(sync, clock, workers);
     }
 
     private Clock clock(LocalDate day, int hour) {
