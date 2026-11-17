@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import tw.holdings.trade.InsufficientSharesException;
@@ -25,15 +26,23 @@ import tw.holdings.trade.TradeOrderException;
 @RequestMapping("/v2/holdings")
 class TradePageController {
     private final TradeHoldingService service;
+    private final TradeDateRules dates;
 
-    TradePageController(TradeHoldingService service) {
+    TradePageController(TradeHoldingService service, TradeDateRules dates) {
         this.service = service;
+        this.dates = dates;
     }
 
     @GetMapping
     String list(Model model) {
         model.addAttribute("trade", emptyForm());
         return showList(model);
+    }
+
+    @GetMapping("/trade-date-range")
+    @ResponseBody
+    TradeDateRules.Range tradeDateRange(@RequestParam String code) {
+        return dates.newTradeRange(code);
     }
 
     @GetMapping("/{id}")
@@ -116,7 +125,7 @@ class TradePageController {
 
     private String showTradeEdit(TradeHoldingService.TradeTarget target, Model model) {
         model.addAttribute("target", target);
-        model.addAttribute("maxTradeDate", service.today());
+        addDateRange(dates.editRange(target.holding().code()), model);
         return "trades/edit-trade";
     }
 
@@ -173,21 +182,29 @@ class TradePageController {
     }
 
     private TradeInput emptyForm() {
-        LocalDate today = service.today();
+        LocalDate today = dates.today();
         return new TradeInput(null, null, today, null, null, false);
     }
 
     private String showList(Model model) {
         var holdings = service.list();
         model.addAttribute("holdings", holdings);
-        model.addAttribute("maxTradeDate", service.today());
+        TradeInput form = (TradeInput) model.asMap().get("trade");
+        addDateRange(dates.newTradeRange(form.code()), model);
         model.addAttribute("summary", TradePortfolioSummary.from(holdings));
         return "trades/list";
     }
 
     private String showDetail(long id, Model model) {
-        model.addAttribute("history", service.history(id));
-        model.addAttribute("maxTradeDate", service.today());
+        var history = service.history(id);
+        model.addAttribute("history", history);
+        addDateRange(dates.newTradeRange(history.holding().code()), model);
         return "trades/detail";
+    }
+
+    private void addDateRange(TradeDateRules.Range range, Model model) {
+        model.addAttribute("minTradeDate", range.minDate());
+        model.addAttribute("maxTradeDate", range.maxDate());
+        model.addAttribute("firstListingDate", range.firstListingDate());
     }
 }

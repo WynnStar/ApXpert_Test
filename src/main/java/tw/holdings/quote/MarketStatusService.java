@@ -25,6 +25,11 @@ public class MarketStatusService {
         this.clock = clock;
     }
 
+    public Optional<LocalDate> firstListingDate(String code) {
+        return repository.identity(code).map(MarketStatusRepository.Identity::listedOn)
+                .filter(listedOn -> listingEvent(code, listedOn).isEmpty());
+    }
+
     public Optional<Delisting> delisting(String code) {
         return listingEvent(code, today()).filter(event -> event.kind() == MarketEvent.Kind.DELISTED)
                 .map(event -> {

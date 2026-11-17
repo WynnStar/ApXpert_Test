@@ -5,7 +5,13 @@
     <ul th:if="${#fields.hasAnyErrors()}" role="alert">
         <li th:each="error : ${#fields.allErrors()}" th:text="${error}"></li>
     </ul>
-    <p><label>交易日期 <input type="date" th:field="*{tradeDate}" th:max="${maxTradeDate}" required></label></p>
+    <p><label>交易日期
+        <input type="date" th:field="*{tradeDate}" th:min="${minTradeDate}" th:max="${maxTradeDate}"
+               aria-describedby="trade-date-hint" required>
+    </label></p>
+    <p id="trade-date-hint" role="status"
+       th:text="${firstListingDate != null ? '首次上市或上櫃日為 ' + firstListingDate + '，最早可登記 ' + minTradeDate
+                : '首次掛牌日未能確認，最早可登記 ' + minTradeDate}"></p>
     <p><label>股數 <input type="number" th:field="*{shares}" min="1" step="1" required></label></p>
     <p><label>每股價格 <input type="number" th:field="*{unitPrice}" min="0.01" step="0.01" required></label></p>
 </div>

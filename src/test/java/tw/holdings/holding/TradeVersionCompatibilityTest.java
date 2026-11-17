@@ -58,6 +58,7 @@ class TradeVersionCompatibilityTest {
                 .when(quotes).forDisplay(org.mockito.ArgumentMatchers.anyString(), nullable(Market.class));
         jdbc.update("DELETE FROM market_final_close");
         jdbc.update("DELETE FROM market_event");
+        jdbc.update("DELETE FROM market_identity");
         jdbc.update("DELETE FROM holding_trades");
         jdbc.update("DELETE FROM holdings");
         fixedQuote("0050", "元大台灣50", "170.00");
@@ -698,6 +699,83 @@ class TradeVersionCompatibilityTest {
                         .param("tradeDate", "2026-11-16").param("shares", "300").param("unitPrice", "100"))
                 .andExpect(content().string(containsString("無法登記該日或之後的買進")));
         mvc.perform(get(trades)).andExpect(jsonPath("$[0].trade_date").value("2026-11-13"));
+    }
+
+    @Test
+    void newTradesUseTheInclusiveRollingFiveYearBoundary() throws Exception {
+        LocalDate floor = LocalDate.now(java.time.ZoneId.of("Asia/Taipei")).minusYears(5);
+        String buy = """
+                {"code":"2330","trade_date":"%s","shares":300,"unit_price":100}
+                """;
+        mvc.perform(post(V2).contentType(MediaType.APPLICATION_JSON).content(buy.formatted(floor.minusDays(1))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.message", containsString(floor + "（五年前）")));
+        var created = mvc.perform(post(V2).contentType(MediaType.APPLICATION_JSON).content(buy.formatted(floor)))
+                .andExpect(status().isCreated()).andReturn();
+        long id = json.readTree(created.getResponse().getContentAsByteArray()).get("id").longValue();
+        String trades = V2 + "/" + id + "/trades";
+        String sale = """
+                {"side":"SELL","trade_date":"%s","shares":100,"unit_price":110}
+                """;
+        mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON).content(sale.formatted(floor.minusDays(1))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.message", containsString(floor.toString())));
+        mvc.perform(post(trades).contentType(MediaType.APPLICATION_JSON).content(sale.formatted(floor)))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.shares").value(200));
+        mvc.perform(get("/v2/holdings/" + id))
+                .andExpect(content().string(containsString("min=\"" + floor + "\"")));
+        mvc.perform(get("/v2/holdings/trade-date-range").param("code", "2330"))
+                .andExpect(jsonPath("$.minDate").value(floor.toString()))
+                .andExpect(jsonPath("$.firstListingDate").value(nullValue()));
+    }
+
+    @Test
+    void firstListingDateLimitsCreationAndEditingButOldTradesRemainEditable() throws Exception {
+        LocalDate today = LocalDate.now(java.time.ZoneId.of("Asia/Taipei"));
+        LocalDate listing = today.minusYears(1);
+        jdbc.update("INSERT INTO market_identity (code, issuer_id, listed_on) VALUES ('2330', '12345678', ?)", listing);
+        String buy = """
+                {"code":"2330","trade_date":"%s","shares":300,"unit_price":100}
+                """;
+        mvc.perform(get("/v2/holdings/trade-date-range").param("code", "2330"))
+                .andExpect(jsonPath("$.minDate").value(listing.toString()))
+                .andExpect(jsonPath("$.firstListingDate").value(listing.toString()));
+        mvc.perform(post(V2).contentType(MediaType.APPLICATION_JSON).content(buy.formatted(listing.minusDays(1))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.message", containsString("不得早於首次上市或上櫃日")));
+        var created = mvc.perform(post(V2).contentType(MediaType.APPLICATION_JSON).content(buy.formatted(listing)))
+                .andExpect(status().isCreated()).andReturn();
+        long id = json.readTree(created.getResponse().getContentAsByteArray()).get("id").longValue();
+        long tradeId = jdbc.queryForObject("SELECT id FROM holding_trades WHERE holding_id = ?", Long.class, id);
+        String edit = "/v2/holdings/" + id + "/trades/" + tradeId + "/edit";
+        mvc.perform(get(edit)).andExpect(content().string(containsString("min=\"" + listing + "\"")));
+        mvc.perform(post(edit).param("tradeDate", listing.minusDays(1).toString()).param("shares", "300")
+                        .param("unitPrice", "101"))
+                .andExpect(content().string(containsString("交易日期不得早於首次上市或上櫃日 " + listing)));
+        mvc.perform(get(V2 + "/" + id + "/trades")).andExpect(jsonPath("$[0].unit_price").value(100));
+        mvc.perform(post(edit).param("tradeDate", listing.toString()).param("shares", "300").param("unitPrice", "101"))
+                .andExpect(redirectedUrl("/v2/holdings/" + id));
+
+        LocalDate oldTrade = today.minusYears(6);
+        jdbc.update("UPDATE market_identity SET listed_on = ? WHERE code = '2330'", oldTrade.minusYears(1));
+        jdbc.update("UPDATE holding_trades SET trade_date = ? WHERE id = ?", oldTrade, tradeId);
+        mvc.perform(post(edit).param("tradeDate", oldTrade.toString()).param("shares", "301").param("unitPrice", "102"))
+                .andExpect(redirectedUrl("/v2/holdings/" + id));
+        mvc.perform(get(V2 + "/" + id + "/trades")).andExpect(jsonPath("$[0].shares").value(301))
+                .andExpect(jsonPath("$[0].trade_date").value(oldTrade.toString()));
+    }
+
+    @Test
+    void marketTransferDateAloneIsNotTreatedAsFirstListingDate() throws Exception {
+        LocalDate transfer = LocalDate.now(java.time.ZoneId.of("Asia/Taipei")).minusYears(1);
+        recordMarketEvent("2330", "TWSE", transfer.toString(), "RELISTED", "台積電");
+        jdbc.update("INSERT INTO market_identity (code, issuer_id, listed_on) VALUES ('2330', '12345678', ?)", transfer);
+        mvc.perform(get("/v2/holdings/trade-date-range").param("code", "2330"))
+                .andExpect(jsonPath("$.firstListingDate").value(nullValue()));
+        var earlierListing = transfer.minusYears(1);
+        jdbc.update("UPDATE market_identity SET listed_on = ? WHERE code = '2330'", earlierListing);
+        mvc.perform(get("/v2/holdings/trade-date-range").param("code", "2330"))
+                .andExpect(jsonPath("$.firstListingDate").value(earlierListing.toString()));
     }
 
     private void recordMarketEvent(String code, String market, String date, String kind, String name) {
