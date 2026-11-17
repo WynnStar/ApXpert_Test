@@ -105,18 +105,40 @@ class TradeHoldingService {
         }
     }
 
-    record TradeDeleteTarget(DeleteTarget holding, TradeEntry entry, boolean lastTrade, boolean v2Managed) {
+    record TradeTarget(DeleteTarget holding, TradeEntry entry, boolean lastTrade, boolean v2Managed) {
     }
 
     enum TradeDeletion {
         TRADE_DELETED, HOLDING_DELETED, CONFIRM_AGAIN
     }
 
-    TradeDeleteTarget tradeDeleteTarget(long id, long tradeId) {
+    TradeTarget tradeTarget(long id, long tradeId) {
         Holding holding = holdings.findById(id).orElseThrow(() -> new HoldingNotFoundException(id));
         var entries = ledger.entries(id);
-        return new TradeDeleteTarget(DeleteTarget.from(holding), findTrade(entries, tradeId),
+        return new TradeTarget(DeleteTarget.from(holding), findTrade(entries, tradeId),
                 entries.size() == 1, holding.isV2Managed());
+    }
+
+    @Transactional
+    public void editTrade(long id, long tradeId, TradeEditForm form) {
+        Holding holding = holdings.lockById(id).orElseThrow(() -> new HoldingNotFoundException(id));
+        TradeEntry original = findTrade(ledger.entries(id), tradeId);
+        Trade edited = form.applyTo(original.trade().side());
+        if (edited.side() != Trade.Side.OPENING) {
+            validateTradeDate(edited, today());
+        }
+        if (!holding.isV2Managed()) {
+            if (!Boolean.TRUE.equals(form.confirmV2())) {
+                throw HoldingVersionConflict.confirmationRequired();
+            }
+            holding.startV2Management();
+        }
+
+        try {
+            ledger.updateTrade(id, original, edited, holding.code());
+        } catch (ArithmeticException error) {
+            throw new HoldingApiController.ApiValidationException("修改後的累計股數超過可儲存的範圍");
+        }
     }
 
     @Transactional

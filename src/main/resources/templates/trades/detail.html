@@ -36,7 +36,10 @@
                     <button th:if="${entry.canMoveDown}" type="submit" name="direction" value="DOWN">下移</button>
                 </form>
             </td>
-            <td><a th:href="@{/v2/holdings/{id}/trades/{tradeId}/delete(id=${holding.id},tradeId=${entry.id})}">刪除</a></td>
+            <td>
+                <a th:href="@{/v2/holdings/{id}/trades/{tradeId}/edit(id=${holding.id},tradeId=${entry.id})}">修改</a>
+                <a th:href="@{/v2/holdings/{id}/trades/{tradeId}/delete(id=${holding.id},tradeId=${entry.id})}">刪除</a>
+            </td>
         </tr>
         </tbody>
     </table>
