@@ -37,7 +37,7 @@ class HoldingService {
                 .toList();
     }
 
-    private HoldingQuoteView withQuote(HoldingDetails holding) {
+    HoldingQuoteView withQuote(HoldingDetails holding) {
         QuoteResult quote = quotes.lookup(holding.code(), holding.market());
         boolean found = quote.status() == QuoteResult.Status.FOUND;
         String name = found ? quote.name() : holding.name();
@@ -54,7 +54,7 @@ class HoldingService {
         return find(id).toDetails();
     }
 
-    void create(String code, int lots, BigDecimal buyPrice) {
+    HoldingDetails create(String code, int lots, BigDecimal buyPrice) {
         String normalizedCode = code.strip();
         if (repository.existsByCode(normalizedCode)) {
             throw new DuplicateHoldingException(normalizedCode, null);
@@ -64,7 +64,8 @@ class HoldingService {
             throw new StockLookupException(quote.status());
         }
         try {
-            repository.saveAndFlush(new Holding(normalizedCode, lots, buyPrice, quote.name(), quote.market()));
+            return repository.saveAndFlush(new Holding(
+                    normalizedCode, lots, buyPrice, quote.name(), quote.market())).toDetails();
         } catch (DataIntegrityViolationException exception) {
             if (exception.getMostSpecificCause() instanceof SQLException sqlException
                     && "23505".equals(sqlException.getSQLState())) {
@@ -75,8 +76,10 @@ class HoldingService {
     }
 
     @Transactional
-    void update(long id, int lots, BigDecimal buyPrice) {
-        find(id).update(lots, buyPrice);
+    HoldingDetails update(long id, int lots, BigDecimal buyPrice) {
+        Holding holding = find(id);
+        holding.update(lots, buyPrice);
+        return holding.toDetails();
     }
 
     @Transactional

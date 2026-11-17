@@ -62,6 +62,33 @@ sh ./mvnw spring-boot:run
 Windows 執行 `.\mvnw.cmd test`，macOS／Linux 執行 `sh ./mvnw test`。
 損益測試使用固定價格，不會連到官方行情。
 
+## Android App 1.0 API
+
+後端啟動後，App 模擬器的伺服器網址填 `http://10.0.2.2:8080`，
+API 前綴由 App 自動加上。在電腦上可用 `http://localhost:8080` 測試。
+
+| 方法 | 路徑 | 成功狀態 |
+| --- | --- | --- |
+| GET | `/api/v1/holdings` | 200 |
+| GET | `/api/v1/holdings/{id}` | 200 |
+| POST | `/api/v1/holdings` | 201 |
+| PUT | `/api/v1/holdings/{id}` | 200 |
+| DELETE | `/api/v1/holdings/{id}` | 204 |
+| GET | `/api/v1/summary` | 200 |
+
+例如，先以 `curl.exe http://localhost:8080/api/v1/holdings` 查詢。
+在 Postman 用 JSON 送出新增範例 `{"code":"0050","lots":2,"buy_price":150.00}`。
+修改時以回傳的 `id` 呼叫 PUT，送 `{"lots":3,"buy_price":151.50}`。
+欄位名稱採小寫底線，股票代號為字串。行情缺少時，
+`current_price`、`price_date`、`pnl`、`return_pct` 會是 `null`。
+
+查無代號回 `404 STOCK_NOT_FOUND`。如果官方連線失敗而無法驗證新代號，
+或舊有資料缺少 App 必須的股票名稱及市場且當下無法補齊，
+會回 `503 QUOTE_UNAVAILABLE`。API 測試使用固定行情。
+框架錯誤也回 `{"error":{"code":"…","message":"…"}}`，
+錯誤路徑保留 404、錯誤方法保留 405、不支援的內容類型保留 415，
+伺服器例外回 500，詳細例外記錄在伺服器日誌。
+
 ## Eclipse
 
 選擇 File → Import → Maven → Existing Maven Projects，匯入本目錄的 `pom.xml`。
