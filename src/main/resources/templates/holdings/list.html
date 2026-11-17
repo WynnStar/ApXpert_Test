@@ -6,6 +6,10 @@
     <title>持股清單｜持股記帳</title>
     <script defer th:src="@{/js/holding-validation.js}"></script>
     <script defer th:src="@{/js/stock-lookup.js}"></script>
+    <style>
+        .profit-positive { color: #b42318; }
+        .profit-negative { color: #08783e; }
+    </style>
 </head>
 <body>
 <main>
@@ -13,13 +17,32 @@
     <h1>持股清單</h1>
     <p th:if="${notice}" th:text="${notice}" role="status"></p>
 
+    <section aria-labelledby="summary-heading"
+             th:with="direction=${summary.pnl.signum()}">
+        <h2 id="summary-heading">持股總計</h2>
+        <dl>
+            <dt>總成本（含買進手續費）</dt>
+            <dd th:text="|${#numbers.formatInteger(summary.totalCost, 1, 'COMMA')} 元|"></dd>
+            <dt>總市值</dt>
+            <dd th:text="|${#numbers.formatInteger(summary.marketValue, 1, 'COMMA')} 元|"></dd>
+            <dt>總盈虧</dt>
+            <dd th:class="${direction > 0 ? 'profit-positive' : (direction < 0 ? 'profit-negative' : null)}"
+                th:text="|${direction > 0 ? '+' : ''}${#numbers.formatInteger(summary.pnl, 1, 'COMMA')} 元|"></dd>
+            <dt>總收益率</dt>
+            <dd th:class="${direction > 0 ? 'profit-positive' : (direction < 0 ? 'profit-negative' : null)}"
+                th:text="|${direction > 0 ? '+' : ''}${summary.returnPct.toPlainString()}%|"></dd>
+        </dl>
+        <p th:if="${summary.quoteMissing > 0}"
+           th:text="|有 ${summary.quoteMissing} 筆持股未取得收盤價。這些持股仍計入總成本，市值與盈虧暫不計入。|"></p>
+    </section>
+
     <p th:if="${#lists.isEmpty(holdings)}">目前沒有持股。</p>
     <table th:unless="${#lists.isEmpty(holdings)}">
         <thead>
-        <tr><th>股票代號</th><th>股票名稱</th><th>市場</th><th>張數</th><th>買進價（每股）</th><th>收盤價</th><th>收盤日期</th><th>操作</th></tr>
+        <tr><th>股票代號</th><th>股票名稱</th><th>市場</th><th>張數</th><th>買進價（每股）</th><th>收盤價</th><th>收盤日期</th><th>盈虧</th><th>收益率</th><th>操作</th></tr>
         </thead>
         <tbody>
-        <tr th:each="holding : ${holdings}">
+        <tr th:each="holding : ${holdings}" th:with="direction=${holding.profit.pnl == null ? 0 : holding.profit.pnl.signum()}">
             <td th:text="${holding.code}"></td>
             <td th:text="${holding.name ?: '未取得'}"></td>
             <td th:text="${holding.market == null ? '未取得' : holding.market.label}"></td>
@@ -27,6 +50,10 @@
             <td th:text="${holding.buyPrice.toPlainString()}"></td>
             <td th:text="${holding.close == null ? '未取得' : holding.close.toPlainString()}"></td>
             <td th:text="${holding.priceDate ?: '未取得'}"></td>
+            <td th:class="${direction > 0 ? 'profit-positive' : (direction < 0 ? 'profit-negative' : null)}"
+                th:text="${holding.profit.pnl == null ? '未取得' : (direction > 0 ? '+' : '') + #numbers.formatInteger(holding.profit.pnl, 1, 'COMMA') + ' 元'}"></td>
+            <td th:class="${direction > 0 ? 'profit-positive' : (direction < 0 ? 'profit-negative' : null)}"
+                th:text="${holding.profit.returnPct == null ? '未取得' : (direction > 0 ? '+' : '') + holding.profit.returnPct.toPlainString() + '%'}"></td>
             <td>
                 <a th:href="@{/holdings/{id}/edit(id=${holding.id})}">修改</a>
                 <form th:action="@{/holdings/{id}/delete(id=${holding.id})}" method="post">

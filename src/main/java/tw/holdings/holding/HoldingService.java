@@ -7,6 +7,8 @@ import java.util.List;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tw.holdings.profit.PortfolioSummary;
+import tw.holdings.profit.ProfitCalculator;
 import tw.holdings.quote.QuoteResult;
 import tw.holdings.quote.QuoteService;
 
@@ -18,6 +20,14 @@ class HoldingService {
     HoldingService(HoldingRepository repository, QuoteService quotes) {
         this.repository = repository;
         this.quotes = quotes;
+    }
+
+    HoldingPortfolio portfolio() {
+        List<HoldingQuoteView> holdings = list();
+        PortfolioSummary summary = PortfolioSummary.from(holdings.stream()
+                .map(HoldingQuoteView::profit)
+                .toList());
+        return new HoldingPortfolio(holdings, summary);
     }
 
     List<HoldingQuoteView> list() {
@@ -35,8 +45,9 @@ class HoldingService {
         if (found && (holding.name() == null || holding.market() == null)) {
             repository.fillMissingIdentity(holding.id(), name, market);
         }
+        var profit = ProfitCalculator.calculate(holding.code(), holding.lots(), holding.buyPrice(), quote.close());
         return new HoldingQuoteView(holding.id(), holding.code(), holding.lots(),
-                holding.buyPrice(), name, market, quote.close(), quote.priceDate());
+                holding.buyPrice(), name, market, quote.close(), quote.priceDate(), profit);
     }
 
     HoldingDetails get(long id) {
