@@ -29,7 +29,7 @@ class TwseQuoteClient implements QuoteSource {
     public QuoteResult fetch(String code, YearMonth month, LocalDate today)
             throws IOException, InterruptedException {
         String date = month.atDay(1).format(DateTimeFormatter.BASIC_ISO_DATE);
-        JsonNode body = http.fetch(endpoint + "?date=" + date + "&stockNo=" + code + "&response=json");
+        JsonNode body = http.fetch(market(), endpoint + "?date=" + date + "&stockNo=" + code + "&response=json");
         String status = body.path("stat").asText();
         if (status.equals("很抱歉，沒有符合條件的資料!") || status.equals("很抱歉，沒有符合條件的資料！")) {
             return QuoteResult.notFound();

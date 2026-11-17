@@ -46,7 +46,7 @@ class HoldingService {
     }
 
     HoldingQuoteView withQuote(HoldingDetails holding) {
-        QuoteResult quote = quotes.lookup(holding.code(), holding.market());
+        QuoteResult quote = quotes.forDisplay(holding.code(), holding.market());
         boolean found = quote.status() == QuoteResult.Status.FOUND;
         String name = found ? quote.name() : holding.name();
         var market = found ? quote.market() : holding.market();

@@ -31,7 +31,7 @@ class TpexQuoteClient implements QuoteSource {
     public QuoteResult fetch(String code, YearMonth month, LocalDate today)
             throws IOException, InterruptedException {
         String date = month.atDay(1).format(REQUEST_DATE);
-        JsonNode body = http.fetch(endpoint + "?code=" + code + "&date=" + date + "&response=json");
+        JsonNode body = http.fetch(market(), endpoint + "?code=" + code + "&date=" + date + "&response=json");
         if (!body.path("stat").asText().equalsIgnoreCase("ok")) {
             throw new IOException("Unexpected TPEx response status");
         }

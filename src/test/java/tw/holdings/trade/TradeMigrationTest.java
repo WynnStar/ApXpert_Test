@@ -22,7 +22,7 @@ class TradeMigrationTest {
             statement.executeUpdate("INSERT INTO holdings (id, code, lots, buy_price) VALUES (12, '0050', 2, 150)");
         }
 
-        assertEquals(2, Flyway.configure().dataSource(url, "sa", "").load().migrate().migrationsExecuted);
+        assertEquals(3, Flyway.configure().dataSource(url, "sa", "").load().migrate().migrationsExecuted);
         try (var connection = DriverManager.getConnection(url, "sa", "");
              var statement = connection.createStatement()) {
             try (var rows = statement.executeQuery("SELECT id, code, lots, buy_price FROM holdings")) {

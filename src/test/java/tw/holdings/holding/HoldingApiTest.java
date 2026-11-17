@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -49,6 +50,8 @@ class HoldingApiTest {
 
     @BeforeEach
     void clearHoldings() {
+        doAnswer(invocation -> quotes.lookup(invocation.getArgument(0), invocation.getArgument(1)))
+                .when(quotes).forDisplay(org.mockito.ArgumentMatchers.anyString(), nullable(Market.class));
         jdbc.update("DELETE FROM holding_trades");
         repository.deleteAll();
     }

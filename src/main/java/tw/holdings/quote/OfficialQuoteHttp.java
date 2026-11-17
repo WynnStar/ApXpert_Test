@@ -5,6 +5,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Clock;
 import java.time.Duration;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -18,17 +19,30 @@ class OfficialQuoteHttp {
             .build();
     private final ObjectMapper mapper;
 
-    OfficialQuoteHttp(ObjectMapper mapper) {
+    private final OfficialQuoteRateLimit rateLimit;
+    private final Clock clock;
+
+    OfficialQuoteHttp(ObjectMapper mapper, OfficialQuoteRateLimit rateLimit, Clock clock) {
         this.mapper = mapper;
+        this.rateLimit = rateLimit;
+        this.clock = clock;
     }
 
-    JsonNode fetch(String url) throws IOException, InterruptedException {
+    JsonNode fetch(Market market, String url) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(URI.create(url))
                 .header("Accept", "application/json")
                 .timeout(Duration.ofSeconds(4))
                 .GET()
                 .build();
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response;
+        var gate = rateLimit.gate(market);
+        synchronized (gate) {
+            gate.beforeRequest(clock.instant());
+            response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 429) {
+                gate.pause(clock.instant(), response.headers().firstValue("Retry-After").orElse(""));
+            }
+        }
         if (response.statusCode() != 200) {
             throw new IOException("HTTP " + response.statusCode());
         }
