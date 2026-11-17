@@ -8,6 +8,7 @@ import java.time.ZonedDateTime;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,21 +29,27 @@ public class QuoteService {
     private final QuoteCacheRepository cache;
     private final List<QuoteSource> sources;
     private final Clock clock;
+    private final MarketStatusService markets;
     private final ExecutorService quoteWorkers;
     private final ConcurrentHashMap<String, CompletableFuture<QuoteResult>> inFlight = new ConcurrentHashMap<>();
 
     QuoteService(QuoteCacheRepository cache, List<QuoteSource> sources, Clock clock,
-                 ExecutorService quoteWorkers) {
+                 ExecutorService quoteWorkers, MarketStatusService markets) {
         this.cache = cache;
         this.sources = sources.stream().sorted(Comparator.comparing(QuoteSource::market)).toList();
         this.clock = clock;
+        this.markets = markets;
         this.quoteWorkers = quoteWorkers;
     }
 
     public QuoteResult lookup(String code, Market knownMarket) {
         ZonedDateTime now = taipeiNow();
         var day = now.toLocalDate();
-        var today = cache.find(day, code).orElse(null);
+        var listing = markets.listingEvent(code, day).orElse(null);
+        if (isDelisted(listing)) {
+            return QuoteResult.notFound();
+        }
+        var today = dailyEntry(day, code, listing);
         if (today != null && today.result().status() != QuoteResult.Status.UNAVAILABLE) {
             if (today.result().status() == QuoteResult.Status.FOUND) {
                 queueIfDue(code, knownMarket, now, today);
@@ -51,7 +58,7 @@ public class QuoteService {
         }
 
         if (!QuoteRefreshPolicy.isWeekday(now)) {
-            var prior = cache.latestFound(day, code);
+            var prior = latestFound(day, code, listing);
             if (prior.isPresent()) {
                 return prior.get();
             }
@@ -72,13 +79,21 @@ public class QuoteService {
     public QuoteResult forDisplay(String code, Market knownMarket) {
         ZonedDateTime now = taipeiNow();
         var day = now.toLocalDate();
-        var today = cache.find(day, code).orElse(null);
+        var listing = markets.listingEvent(code, day).orElse(null);
+        if (isDelisted(listing)) {
+            return QuoteResult.notFound();
+        }
+        var today = dailyEntry(day, code, listing);
         if (today != null && day.equals(today.result().priceDate())) {
             return today.result();
         }
-        var last = cache.latestFound(day, code).orElse(null);
+        var last = latestFound(day, code, listing).orElse(null);
         queueIfDue(code, knownMarket, now, today);
-        return last == null ? QuoteResult.unavailable() : last;
+        if (last != null) {
+            return last;
+        }
+        return listing == null ? QuoteResult.unavailable()
+                : QuoteResult.found(listing.name(), listing.market(), null);
     }
 
     @Scheduled(fixedDelay = 30_000)
@@ -86,6 +101,7 @@ public class QuoteService {
         ZonedDateTime now = taipeiNow();
         if (QuoteRefreshPolicy.isPostClose(now)) {
             cache.dueAfterClose(now.toLocalDate(), now.toInstant())
+                    .stream().filter(due -> !isDelisted(markets.listingEvent(due.code(), now.toLocalDate()).orElse(null)))
                     .forEach(due -> submit(due.code(), due.market(), false));
         }
     }
@@ -124,19 +140,27 @@ public class QuoteService {
     private QuoteResult refresh(String code, Market hint, boolean validation) {
         ZonedDateTime now = taipeiNow();
         var day = now.toLocalDate();
-        if (!validation && !QuoteRefreshPolicy.isWeekday(now)) {
-            return cache.latestFound(day, code).orElseGet(QuoteResult::unavailable);
+        var listing = markets.listingEvent(code, day).orElse(null);
+        if (isDelisted(listing)) {
+            return QuoteResult.notFound();
         }
-        var entry = cache.find(day, code).orElse(null);
+        if (!validation && !QuoteRefreshPolicy.isWeekday(now)) {
+            return latestFound(day, code, listing).orElseGet(QuoteResult::unavailable);
+        }
+        var entry = dailyEntry(day, code, listing);
         if (!QuoteRefreshPolicy.canRefresh(now, entry)) {
             return entry.result();
         }
 
-        var last = cache.latestFound(day, code).orElse(null);
-        Market market = hint != null ? hint : last == null ? null : last.market();
+        var last = latestFound(day, code, listing).orElse(null);
+        Market market = listing != null ? listing.market()
+                : hint != null ? hint : last == null ? null : last.market();
         boolean postClose = QuoteRefreshPolicy.isPostClose(now);
         boolean onlyCurrentMonth = postClose && last != null && last.close() != null;
         QuoteResult result = lookupOfficial(code, market, day, onlyCurrentMonth);
+        if (listing != null && result.priceDate() != null && result.priceDate().isBefore(listing.date())) {
+            result = QuoteResult.found(listing.name(), market, null);
+        }
         if (result.status() == QuoteResult.Status.NOT_FOUND && market != null) {
             result = QuoteResult.unavailable();
         }
@@ -148,6 +172,29 @@ public class QuoteService {
         QuoteResult retained = keepLatest(result, last);
         cache.save(day, code, new QuoteCacheRepository.Entry(retained, failures, attempts, next), now.toInstant());
         return failed ? result : retained;
+    }
+
+    private QuoteCacheRepository.Entry dailyEntry(LocalDate day, String code, MarketEvent listing) {
+        var entry = cache.find(day, code).orElse(null);
+        if (entry == null || listing == null) {
+            return entry;
+        }
+        var result = entry.result();
+        if (result.status() == QuoteResult.Status.FOUND
+                && (result.market() != listing.market()
+                || result.priceDate() != null && result.priceDate().isBefore(listing.date()))) {
+            return null;
+        }
+        return entry;
+    }
+
+    private Optional<QuoteResult> latestFound(LocalDate day, String code, MarketEvent listing) {
+        return listing == null ? cache.latestFound(day, code)
+                : cache.latestFound(day, code, listing.date(), listing.market());
+    }
+
+    private boolean isDelisted(MarketEvent listing) {
+        return listing != null && listing.kind() == MarketEvent.Kind.DELISTED;
     }
 
     private QuoteResult keepLatest(QuoteResult received, QuoteResult existing) {

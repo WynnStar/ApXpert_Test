@@ -20,6 +20,7 @@ final class OfficialQuoteData {
             throw new IOException("Missing trade date or closing price column");
         }
 
+        int volumeColumn = column(fields, Set.of("成交股數", "成交股數(股)", "成交張數"));
         Price latest = null;
         for (JsonNode row : rows) {
             if (!row.isArray() || row.size() <= Math.max(dateColumn, closeColumn)) {
@@ -30,6 +31,9 @@ final class OfficialQuoteData {
             if (rawClose.isEmpty() || rawClose.equals("--") || rawClose.equals("---")) {
                 continue;
             }
+            if (volumeColumn >= 0 && !hasTradingVolume(row.path(volumeColumn).asText())) {
+                continue;
+            }
             BigDecimal close = new BigDecimal(rawClose);
             if (close.signum() > 0 && !date.isAfter(today)
                     && (latest == null || date.isAfter(latest.date()))) {
@@ -37,6 +41,11 @@ final class OfficialQuoteData {
             }
         }
         return latest;
+    }
+
+    private static boolean hasTradingVolume(String text) {
+        String amount = text.replace(",", "").strip();
+        return amount.matches("[0-9]+") && amount.chars().anyMatch(digit -> digit != '0');
     }
 
     private static int column(JsonNode fields, Set<String> labels) {

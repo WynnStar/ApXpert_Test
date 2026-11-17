@@ -39,11 +39,18 @@ class QuoteCacheRepository {
     }
 
     Optional<QuoteResult> latestFound(LocalDate day, String code) {
+        return latestFound(day, code, null, null);
+    }
+
+    Optional<QuoteResult> latestFound(LocalDate day, String code, LocalDate since, Market market) {
         return jdbc.query("""
                 SELECT status, stock_name, market, close_price, price_date
                 FROM quote_cache WHERE code = ? AND lookup_date <= ? AND status = 'FOUND'
+                    AND (CAST(? AS DATE) IS NULL OR price_date >= ?)
+                    AND (CAST(? AS VARCHAR) IS NULL OR market = ?)
                 ORDER BY price_date DESC NULLS LAST, lookup_date DESC FETCH FIRST 1 ROW ONLY
-                """, (row, index) -> readResult(row), code, day).stream().findFirst();
+                """, (row, index) -> readResult(row), code, day, since, since,
+                market == null ? null : market.name(), market == null ? null : market.name()).stream().findFirst();
     }
 
     List<DueCode> dueAfterClose(LocalDate day, Instant now) {

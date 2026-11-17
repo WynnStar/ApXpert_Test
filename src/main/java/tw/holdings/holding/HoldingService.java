@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import tw.holdings.profit.PortfolioSummary;
 import tw.holdings.profit.ProfitCalculator;
+import tw.holdings.quote.MarketStatusService;
 import tw.holdings.quote.QuoteResult;
 import tw.holdings.quote.QuoteService;
 import tw.holdings.trade.TradeLedgerService;
@@ -18,14 +19,16 @@ import tw.holdings.trade.TradeLedgerService;
 class HoldingService {
     private final HoldingRepository repository;
     private final QuoteService quotes;
+    private final MarketStatusService markets;
 
     private final TradeLedgerService ledger;
     private final TransactionTemplate transactions;
 
     HoldingService(HoldingRepository repository, QuoteService quotes,
-                   TradeLedgerService ledger, TransactionTemplate transactions) {
+                   TradeLedgerService ledger, TransactionTemplate transactions, MarketStatusService markets) {
         this.repository = repository;
         this.quotes = quotes;
+        this.markets = markets;
         this.ledger = ledger;
         this.transactions = transactions;
     }
@@ -46,6 +49,14 @@ class HoldingService {
     }
 
     HoldingQuoteView withQuote(HoldingDetails holding) {
+        var delisting = markets.delisting(holding.code()).orElse(null);
+        if (delisting != null) {
+            String name = holding.name() == null ? delisting.name() : holding.name();
+            var market = holding.market() == null ? delisting.market() : holding.market();
+            var profit = ProfitCalculator.calculate(holding.code(), holding.lots(), holding.buyPrice(), null);
+            return new HoldingQuoteView(holding.id(), holding.code(), holding.lots(),
+                    holding.buyPrice(), name, market, null, null, profit, delisting);
+        }
         QuoteResult quote = quotes.forDisplay(holding.code(), holding.market());
         boolean found = quote.status() == QuoteResult.Status.FOUND;
         String name = found ? quote.name() : holding.name();
@@ -55,7 +66,7 @@ class HoldingService {
         }
         var profit = ProfitCalculator.calculate(holding.code(), holding.lots(), holding.buyPrice(), quote.close());
         return new HoldingQuoteView(holding.id(), holding.code(), holding.lots(),
-                holding.buyPrice(), name, market, quote.close(), quote.priceDate(), profit);
+                holding.buyPrice(), name, market, quote.close(), quote.priceDate(), profit, null);
     }
 
     HoldingDetails get(long id) {
@@ -64,6 +75,9 @@ class HoldingService {
 
     HoldingDetails create(String code, int lots, BigDecimal buyPrice) {
         String normalizedCode = code.strip();
+        markets.delisting(normalizedCode).ifPresent(delisting -> {
+            throw new StockLookupException(QuoteResult.Status.NOT_FOUND, normalizedCode + " " + delisting.label());
+        });
         if (repository.existsByCode(normalizedCode)) {
             throw new DuplicateHoldingException(normalizedCode, null, repository.existsByCodeAndV2ManagedTrue(normalizedCode));
         }

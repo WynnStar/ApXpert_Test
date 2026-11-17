@@ -12,13 +12,15 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import tw.holdings.profit.ProfitCalculator;
 import tw.holdings.quote.Market;
+import tw.holdings.quote.MarketStatusService.Delisting;
 import tw.holdings.trade.TradeEntry;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 record TradeHoldingView(long id, String code, String name, Market market, boolean v2Managed,
                         long shares, BigDecimal remainingCost, BigDecimal averageCost,
                         BigDecimal realizedPnl, BigDecimal unrealizedPnl, BigDecimal currentPrice,
-                        @JsonFormat(shape = JsonFormat.Shape.STRING) LocalDate priceDate) {
+                        @JsonFormat(shape = JsonFormat.Shape.STRING) LocalDate priceDate,
+                        @JsonIgnore Delisting delisting) {
     public BigDecimal displayAverageCost() {
         return shares == 0 ? null : remainingCost.divide(BigDecimal.valueOf(shares), 2, RoundingMode.HALF_UP);
     }

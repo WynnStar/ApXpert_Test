@@ -34,7 +34,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(properties = "spring.datasource.url=jdbc:h2:mem:app-v1-api-test;DB_CLOSE_DELAY=-1")
+@SpringBootTest(properties = {"spring.datasource.url=jdbc:h2:mem:app-v1-api-test;DB_CLOSE_DELAY=-1",
+        "quotes.market-status-sync=false"})
 @AutoConfigureMockMvc
 class HoldingApiTest {
     private static final String HOLDINGS = "/api/v1/holdings";

@@ -29,6 +29,14 @@ class OfficialQuoteHttp {
     }
 
     JsonNode fetch(Market market, String url) throws IOException, InterruptedException {
+        JsonNode payload = fetchDocument(market, url);
+        if (!payload.isObject()) {
+            throw new IOException("Expected an official JSON object");
+        }
+        return payload;
+    }
+
+    JsonNode fetchDocument(Market market, String url) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(URI.create(url))
                 .header("Accept", "application/json")
                 .timeout(Duration.ofSeconds(4))
@@ -47,8 +55,8 @@ class OfficialQuoteHttp {
             throw new IOException("HTTP " + response.statusCode());
         }
         JsonNode payload = mapper.readTree(response.body());
-        if (payload == null || !payload.isObject()) {
-            throw new IOException("Expected an official JSON object");
+        if (payload == null) {
+            throw new IOException("Empty official response");
         }
         return payload;
     }

@@ -48,8 +48,8 @@
             <td th:text="${holding.market == null ? '未取得' : holding.market.label}"></td>
             <td th:text="${holding.lots}"></td>
             <td th:text="${holding.buyPrice.toPlainString()}"></td>
-            <td th:text="${holding.close == null ? '未取得' : holding.close.toPlainString()}"></td>
-            <td th:text="${holding.priceDate ?: '未取得'}"></td>
+            <td th:text="${holding.delisting != null ? holding.delisting.label() : (holding.close == null ? '未取得' : holding.close.toPlainString())}"></td>
+            <td th:text="${holding.delisting != null ? '—' : (holding.priceDate ?: '未取得')}"></td>
             <td th:class="${direction > 0 ? 'profit-positive' : (direction < 0 ? 'profit-negative' : null)}"
                 th:text="${holding.profit.pnl == null ? '未取得' : (direction > 0 ? '+' : '') + #numbers.formatInteger(holding.profit.pnl, 1, 'COMMA') + ' 元'}"></td>
             <td th:class="${direction > 0 ? 'profit-positive' : (direction < 0 ? 'profit-negative' : null)}"

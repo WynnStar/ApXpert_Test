@@ -16,6 +16,9 @@
         <dl>
             <dt>總成本（剩餘持股，含買進手續費）</dt>
             <dd th:text="|${#numbers.formatDecimal(summary.remainingCost, 1, 'COMMA', 2, 'POINT')} 元|"></dd>
+            <dt th:if="${summary.delistedCost.signum() > 0}">已下市／下櫃、無法估值的持股成本</dt>
+            <dd th:if="${summary.delistedCost.signum() > 0}"
+                th:text="|${#numbers.formatDecimal(summary.delistedCost, 1, 'COMMA', 2, 'POINT')} 元|"></dd>
             <dt>總市值</dt>
             <dd th:text="|${#numbers.formatDecimal(summary.marketValue, 1, 'COMMA', 2, 'POINT')} 元|"></dd>
             <dt>總未實現損益</dt>
@@ -44,9 +47,18 @@
             <td th:text="${holding.market == null ? '未取得' : holding.market.label}"></td>
             <td th:text="${holding.shares}"></td>
             <td th:text="${holding.displayAverageCost() ?: '—'}"></td>
-            <td th:text="${holding.currentPrice ?: '未取得'}"></td>
-            <td th:text="${holding.priceDate ?: '未取得'}"></td>
-            <td><span th:replace="~{trades/profit :: money(${holding.unrealizedPnl})}"></span></td>
+            <td th:unless="${holding.delisting}" th:text="${holding.currentPrice ?: '未取得'}"></td>
+            <td th:if="${holding.delisting}">
+                <span th:text="${holding.delisting.label()}"></span>
+                <small th:text="${holding.delisting.lastClose != null ? '最後交易日收盤價 ' + holding.delisting.lastClose : '最後收盤價未取得'}"></small>
+            </td>
+            <td th:text="${holding.delisting != null ? (holding.delisting.lastPriceDate ?: '—') : (holding.priceDate ?: '未取得')}"></td>
+            <td>
+                <span th:if="${holding.delisting != null and holding.shares > 0}">無法估值</span>
+                <th:block th:unless="${holding.delisting != null and holding.shares > 0}">
+                    <span th:replace="~{trades/profit :: money(${holding.unrealizedPnl})}"></span>
+                </th:block>
+            </td>
             <td><span th:replace="~{trades/profit :: rate(${holding.unrealizedReturnPct()})}"></span></td>
             <td><span th:replace="~{trades/profit :: money(${holding.realizedPnl})}"></span></td>
             <td>
