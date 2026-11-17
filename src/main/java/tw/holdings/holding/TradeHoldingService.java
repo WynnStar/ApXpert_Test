@@ -75,7 +75,7 @@ class TradeHoldingService {
     private TradeHoldingView.History history(Holding holding) {
         var trades = ledger.trades(holding.id());
         var position = TradeLedger.replay(holding.code(), trades);
-        QuoteResult quote = position.shares() == 0 ? null : quotes.forDisplay(holding.code(), holding.market());
+        QuoteResult quote = quotes.forDisplay(holding.code(), holding.market());
         boolean found = quote != null && quote.status() == QuoteResult.Status.FOUND;
         var close = found ? quote.close() : null;
         var view = new TradeHoldingView(holding.id(), holding.code(),
