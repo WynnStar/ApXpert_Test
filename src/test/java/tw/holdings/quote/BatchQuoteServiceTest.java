@@ -231,6 +231,62 @@ class BatchQuoteServiceTest {
         verify(historical).lookup(eq("9999"), isNull(), eq(DAY), anyBoolean());
     }
 
+
+    @Test
+    void batchCannotOverwritePriceCommittedByAnotherTransactionAfterItsRead() throws Exception {
+        var latest = QuoteResult.found("台積電", Market.TWSE, new BigDecimal("110.00"), DAY);
+        var batchJdbc = org.mockito.Mockito.spy(jdbc);
+        var independent = new TransactionTemplate(transactionManager);
+        independent.setPropagationBehavior(Propagation.REQUIRES_NEW.value());
+        doAnswer(call -> {
+            independent.executeWithoutResult(status -> cache.save(DAY, "2330",
+                    new QuoteCacheRepository.Entry(latest, 0, 0, clock.instant()), clock.instant()));
+            return call.callRealMethod();
+        }).when(batchJdbc).batchUpdate(any(String.class), org.mockito.ArgumentMatchers.<Object[]>anyList());
+        var raceCache = new QuoteCacheRepository(batchJdbc);
+        var raceBatch = new BatchQuoteService(official, raceCache, clock,
+                new TransactionTemplate(transactionManager));
+        when(official.fetch(eq(Market.TWSE), any())).thenReturn(snapshot(DAY.minusDays(1)));
+
+        assertEquals(latest, raceBatch.lookup("2330", Market.TWSE).orElseThrow());
+        assertEquals(latest, cache.find(DAY, "2330").orElseThrow().result());
+        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM quote_cache", Integer.class));
+    }
+
+    @Test
+    void olderIndividualQuoteCannotReplaceANewerBatchPrice() {
+        var latest = QuoteResult.found("台積電", Market.TWSE, new BigDecimal("110.00"), DAY);
+        var older = QuoteResult.found("台積電", Market.TWSE, new BigDecimal("90.00"), DAY.minusDays(1));
+        cache.save(DAY, "2330", new QuoteCacheRepository.Entry(latest, 0, 0, clock.instant()), clock.instant());
+        cache.save(DAY, "2330", new QuoteCacheRepository.Entry(older, 0, 0, clock.instant()), clock.instant());
+        assertEquals(latest, cache.find(DAY, "2330").orElseThrow().result());
+    }
+
+    @Test
+    void missingBatchPricePreservesActualPreviousTradeDate() throws Exception {
+        var previous = QuoteResult.found("台積電", Market.TWSE, new BigDecimal("90.00"), DAY.minusDays(2));
+        cache.save(DAY.minusDays(1), "2330", new QuoteCacheRepository.Entry(previous, 0, 0, clock.instant()), clock.instant());
+        when(official.fetch(eq(Market.TWSE), any())).thenReturn(new OfficialBatchQuoteClient.Snapshot(
+                DAY, Map.of("2330", QuoteResult.found("台積電", Market.TWSE, null, null),
+                        "0050", snapshot(DAY).quotes().get("0050"))));
+
+        assertEquals(previous, batches.lookup("2330", Market.TWSE).orElseThrow());
+        assertEquals(DAY.minusDays(2), cache.find(DAY, "2330").orElseThrow().result().priceDate());
+    }
+
+
+    @Test
+    void missingPriceCannotEraseValidPriceButSameDayCorrectionCanUpdateIt() {
+        var original = QuoteResult.found("台積電", Market.TWSE, new BigDecimal("110.00"), DAY);
+        var missing = QuoteResult.found("台積電", Market.TWSE, null, null);
+        var corrected = QuoteResult.found("台積電", Market.TWSE, new BigDecimal("111.00"), DAY);
+        cache.save(DAY, "2330", new QuoteCacheRepository.Entry(original, 0, 0, clock.instant()), clock.instant());
+        cache.save(DAY, "2330", new QuoteCacheRepository.Entry(missing, 0, 0, clock.instant()), clock.instant());
+        assertEquals(original, cache.find(DAY, "2330").orElseThrow().result());
+        cache.save(DAY, "2330", new QuoteCacheRepository.Entry(corrected, 0, 0, clock.instant()), clock.instant());
+        assertEquals(corrected, cache.find(DAY, "2330").orElseThrow().result());
+    }
+
     private static OfficialBatchQuoteClient.Snapshot snapshot(LocalDate priceDate) {
         return new OfficialBatchQuoteClient.Snapshot(priceDate, Map.of(
                 "2330", QuoteResult.found("台積電", Market.TWSE, new BigDecimal("100.00"), priceDate),
