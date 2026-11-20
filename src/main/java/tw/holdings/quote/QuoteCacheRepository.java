@@ -28,6 +28,33 @@ class QuoteCacheRepository {
     record DueCode(String code, Market market) {
     }
 
+    // 日期比較與寫入由同一個資料庫敘述完成，避免讀取後再 MERGE 的交錯覆寫。
+    private static final String UPSERT = """
+            MERGE INTO quote_cache c
+            USING (VALUES (
+                CAST(? AS DATE), CAST(? AS VARCHAR), CAST(? AS VARCHAR), CAST(? AS VARCHAR),
+                CAST(? AS VARCHAR), CAST(? AS DECIMAL(38, 2)), CAST(? AS DATE),
+                CAST(? AS TIMESTAMP WITH TIME ZONE), CAST(? AS TIMESTAMP WITH TIME ZONE),
+                CAST(? AS INTEGER), CAST(? AS INTEGER)
+            )) n (lookup_date, code, status, stock_name, market, close_price, price_date,
+                  last_attempt_at, next_attempt_at, failure_count, post_close_attempts)
+            ON c.lookup_date = n.lookup_date AND c.code = n.code
+            WHEN MATCHED AND (
+                n.status <> 'FOUND' OR c.price_date IS NULL
+                OR (n.price_date IS NOT NULL AND n.price_date >= c.price_date)
+            ) THEN UPDATE SET
+                status = n.status, stock_name = n.stock_name, market = n.market,
+                close_price = n.close_price, price_date = n.price_date,
+                last_attempt_at = n.last_attempt_at, next_attempt_at = n.next_attempt_at,
+                failure_count = n.failure_count, post_close_attempts = n.post_close_attempts
+            WHEN NOT MATCHED THEN INSERT
+                (lookup_date, code, status, stock_name, market, close_price, price_date,
+                 last_attempt_at, next_attempt_at, failure_count, post_close_attempts)
+            VALUES (n.lookup_date, n.code, n.status, n.stock_name, n.market, n.close_price,
+                    n.price_date, n.last_attempt_at, n.next_attempt_at,
+                    n.failure_count, n.post_close_attempts)
+            """;
+
     private final JdbcTemplate jdbc;
 
     QuoteCacheRepository(JdbcTemplate jdbc) {
@@ -90,11 +117,7 @@ class QuoteCacheRepository {
 
     void save(LocalDate day, String code, Entry entry, Instant attemptedAt) {
         QuoteResult result = entry.result();
-        jdbc.update("""
-                MERGE INTO quote_cache (lookup_date, code, status, stock_name, market, close_price, price_date,
-                    last_attempt_at, next_attempt_at, failure_count, post_close_attempts)
-                KEY (lookup_date, code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, day, code, result.status().name(), result.name(),
+        jdbc.update(UPSERT, day, code, result.status().name(), result.name(),
                 result.market() == null ? null : result.market().name(), result.close(), result.priceDate(),
                 utc(attemptedAt), utc(entry.nextAttemptAt()), entry.failureCount(), entry.postCloseAttempts());
     }
@@ -136,11 +159,7 @@ class QuoteCacheRepository {
                     result.market().name(), result.close(), result.priceDate(), utc(now.toInstant()),
                     utc(next), 0, attempts });
         }
-        jdbc.batchUpdate("""
-                MERGE INTO quote_cache (lookup_date, code, status, stock_name, market, close_price, price_date,
-                    last_attempt_at, next_attempt_at, failure_count, post_close_attempts)
-                KEY (lookup_date, code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, values);
+        jdbc.batchUpdate(UPSERT, values);
     }
 
     private static Entry readEntry(ResultSet row) throws SQLException {

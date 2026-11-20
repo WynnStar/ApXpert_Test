@@ -1,76 +1,75 @@
 package tw.holdings.quote.client;
 
-import java.io.IOException;
-import java.math.BigDecimal;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.util.Arrays;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.Test;
+import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import tw.holdings.quote.Market;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class OfficialBatchQuoteClientTest {
-    private final ObjectMapper json = new ObjectMapper();
-    private final LocalDate today = LocalDate.of(2026, 11, 18);
+    @ParameterizedTest
+    @EnumSource(Market.class)
+    void requestsConfiguredEndpointWithTaipeiDateAndMarketType(Market market) throws Exception {
+        boolean twse = market == Market.TWSE;
+        byte[] fixture;
+        try (var input = getClass().getResourceAsStream(
+                twse ? "/quotes/twse-mi-index.json" : "/quotes/tpex-otc.json")) {
+            assertNotNull(input);
+            fixture = input.readAllBytes();
+        }
+        var requested = new AtomicReference<URI>();
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/mirror", exchange -> {
+            requested.set(exchange.getRequestURI());
+            exchange.getResponseHeaders().set("Content-Type", "application/json;charset=UTF-8");
+            exchange.sendResponseHeaders(200, fixture.length);
+            try (var output = exchange.getResponseBody()) {
+                output.write(fixture);
+            }
+        });
+        server.start();
+        try {
+            var clock = Clock.fixed(Instant.parse("2026-11-19T16:00:00Z"), ZoneOffset.UTC);
+            LocalDate taipeiDate = clock.instant().atZone(java.time.ZoneId.of("Asia/Taipei")).toLocalDate();
+            var http = new OfficialQuoteHttp(new ObjectMapper(),
+                    new OfficialQuoteRateLimit(Duration.ZERO, Duration.ZERO), clock);
+            String base = "http://127.0.0.1:" + server.getAddress().getPort() + "/mirror";
+            String oldQuery = "?date=19990101&type=wrong&response=csv&marker=kept";
+            var client = new OfficialBatchQuoteClient(http, base + "/MI_INDEX" + oldQuery,
+                    base + "/otc" + oldQuery);
 
-    @Test
-    void parsesTwseAndTpexOfficialFieldsWithoutInventingTodaysDate() throws Exception {
-        var twse = OfficialBatchQuoteClient.parse(json.readTree("""
-                [{"Date":"1151116","Code":"2330","Name":"台積電",
-                  "TradeVolume":"1,000","ClosingPrice":"2,215.00"}]
-                """), Market.TWSE, today);
-        var tpex = OfficialBatchQuoteClient.parse(json.readTree("""
-                [{"Date":"1151117","SecuritiesCompanyCode":"6488","CompanyName":"環球晶",
-                  "TradingShares":"10450392","Close":"546.00"}]
-                """), Market.TPEX, today);
+            var result = client.fetch(market, taipeiDate);
 
-        assertEquals(LocalDate.of(2026, 11, 16), twse.priceDate());
-        assertEquals(twse.priceDate(), twse.quotes().get("2330").priceDate());
-        assertEquals(new BigDecimal("2215.00"), twse.quotes().get("2330").close());
-        assertEquals(Market.TWSE, twse.quotes().get("2330").market());
-        assertEquals(LocalDate.of(2026, 11, 17), tpex.priceDate());
-        assertEquals(new BigDecimal("546.00"), tpex.quotes().get("6488").close());
-        assertEquals(Market.TPEX, tpex.quotes().get("6488").market());
-    }
-
-    @Test
-    void keepsIdentityWithoutTreatingZeroVolumeOrMissingPriceAsATrade() throws Exception {
-        var snapshot = OfficialBatchQuoteClient.parse(json.readTree("""
-                [{"Date":"1151117","Code":"2330","Name":"台積電","TradeVolume":"0","ClosingPrice":"100.00"},
-                 {"Date":"1151117","Code":"0050","Name":"元大台灣50","TradeVolume":"10","ClosingPrice":"--"}]
-                """), Market.TWSE, today);
-
-        assertEquals(2, snapshot.quotes().size());
-        assertEquals("元大台灣50", snapshot.quotes().get("0050").name());
-        assertNull(snapshot.quotes().get("2330").close());
-        assertNull(snapshot.quotes().get("2330").priceDate());
-        assertNull(snapshot.quotes().get("0050").close());
-    }
-
-    @Test
-    void ignoresFutureRowsAndUsesLatestUsableDuplicate() throws Exception {
-        var snapshot = OfficialBatchQuoteClient.parse(json.readTree("""
-                [{"Date":"20261117","Code":"2330","Name":"台積電","TradeVolume":"10","ClosingPrice":"100.00"},
-                 {"Date":"20261116","Code":"2330","Name":"台積電","TradeVolume":"10","ClosingPrice":"90.00"},
-                 {"Date":"20261119","Code":"0050","Name":"元大台灣50","TradeVolume":"10","ClosingPrice":"200.00"}]
-                """), Market.TWSE, today);
-
-        assertEquals(1, snapshot.quotes().size());
-        assertEquals(new BigDecimal("100.00"), snapshot.quotes().get("2330").close());
-    }
-
-    @Test
-    void rejectsEmptyMalformedAndInvalidBatchDocuments() {
-        for (String document : new String[] { "[]", "{}", """
-                [{"Date":"bad-date","Code":"2330","Name":"台積電","TradeVolume":"10","ClosingPrice":"100"}]
-                """, """
-                [{"Date":"1151117","Code":"2330","Name":"台積電","TradeVolume":"10","ClosingPrice":"invalid"}]
-                """ }) {
-            assertThrows(IOException.class,
-                    () -> OfficialBatchQuoteClient.parse(json.readTree(document), Market.TWSE, today));
+            assertEquals(LocalDate.of(2026, 11, 20), result.priceDate());
+            assertEquals(twse ? "/mirror/MI_INDEX" : "/mirror/otc", requested.get().getPath());
+            Map<String, String> query = Arrays.stream(requested.get().getRawQuery().split("&"))
+                    .map(pair -> pair.split("=", 2))
+                    .collect(Collectors.toMap(pair -> pair[0],
+                            pair -> URLDecoder.decode(pair[1], StandardCharsets.UTF_8)));
+            assertEquals(twse ? "20261120" : "2026/11/20", query.get("date"));
+            assertEquals(twse ? "ALLBUT0999" : "EW", query.get("type"));
+            assertEquals("json", query.get("response"));
+            assertEquals("kept", query.get("marker"));
+            assertEquals(market, result.quotes().values().iterator().next().market());
+        } finally {
+            server.stop(0);
         }
     }
 }
