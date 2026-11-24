@@ -27,7 +27,7 @@ class TradeMigrationTest {
                     """);
         }
 
-        assertEquals(4, Flyway.configure().dataSource(url, "sa", "").load().migrate().migrationsExecuted);
+        assertEquals(5, Flyway.configure().dataSource(url, "sa", "").load().migrate().migrationsExecuted);
         try (var connection = DriverManager.getConnection(url, "sa", "");
              var statement = connection.createStatement();
              var trades = statement.executeQuery(
@@ -48,7 +48,7 @@ class TradeMigrationTest {
             statement.executeUpdate("INSERT INTO holdings (id, code, lots, buy_price) VALUES (12, '0050', 2, 150)");
         }
 
-        assertEquals(7, Flyway.configure().dataSource(url, "sa", "").load().migrate().migrationsExecuted);
+        assertEquals(8, Flyway.configure().dataSource(url, "sa", "").load().migrate().migrationsExecuted);
         try (var connection = DriverManager.getConnection(url, "sa", "");
              var statement = connection.createStatement()) {
             try (var rows = statement.executeQuery("SELECT id, code, lots, buy_price FROM holdings")) {

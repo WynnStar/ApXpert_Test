@@ -10,8 +10,8 @@ import java.time.ZonedDateTime;
 
 final class QuoteRefreshPolicy {
     static final ZoneId TAIPEI = ZoneId.of("Asia/Taipei");
-    private static final LocalTime FIRST_REFRESH = LocalTime.of(13, 35);
-    private static final LocalTime SECOND_REFRESH = LocalTime.of(15, 5);
+    private static final LocalTime FIRST_REFRESH = LocalTime.of(13, 40);
+    private static final LocalTime SECOND_REFRESH = LocalTime.of(14, 30);
     private static final Duration FAILURE_PAUSE = Duration.ofMinutes(30);
 
     private QuoteRefreshPolicy() {
@@ -49,28 +49,21 @@ final class QuoteRefreshPolicy {
             return false;
         }
         if (isPostClose(now)) {
-            return entry.lastAttemptAt() == null || entry.lastAttemptAt().isBefore(slotStart(now));
+            return true; // 市場層的持久化進度決定是否真的需要 HTTP 請求。
         }
         return entry.result().status() == QuoteResult.Status.UNAVAILABLE || entry.failureCount() > 0;
     }
 
     static Instant nextAttemptAt(ZonedDateTime now, boolean failed) {
-        LocalDate date = now.toLocalDate();
-        LocalTime nextTime = FIRST_REFRESH;
-        int slot = refreshSlot(now);
-        if (slot == 1) {
-            nextTime = SECOND_REFRESH;
-        } else if (slot == 2 || !isWeekday(now)) {
-            date = date.plusDays(1);
-            while (date.getDayOfWeek() == DayOfWeek.SATURDAY || date.getDayOfWeek() == DayOfWeek.SUNDAY) {
-                date = date.plusDays(1);
-            }
+        if (isPostClose(now)) {
+            return now.toInstant().plus(refreshSlot(now)==1 ? Duration.ofMinutes(2) : Duration.ofMinutes(10));
         }
-        Instant scheduled = date.atTime(nextTime).atZone(TAIPEI).toInstant();
-        if (failed && slot == 0) {
-            return now.toInstant().plus(FAILURE_PAUSE);
+        if (failed) return now.toInstant().plus(FAILURE_PAUSE);
+        LocalDate date=now.toLocalDate();
+        if (!isWeekday(now)) {
+            do { date=date.plusDays(1); }
+            while (date.getDayOfWeek()==DayOfWeek.SATURDAY || date.getDayOfWeek()==DayOfWeek.SUNDAY);
         }
-        Instant cooldownEnd = failed ? now.toInstant().plus(FAILURE_PAUSE) : now.toInstant();
-        return scheduled.isBefore(cooldownEnd) ? cooldownEnd : scheduled;
+        return date.atTime(FIRST_REFRESH).atZone(TAIPEI).toInstant();
     }
 }

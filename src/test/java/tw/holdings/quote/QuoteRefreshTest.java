@@ -119,7 +119,7 @@ class QuoteRefreshTest {
     void backgroundRefreshIsCoalescedAndReturnsCachedValueWithoutWaiting() {
         seed(TUESDAY, YESTERDAY);
         defersWork();
-        clock.set(TUESDAY, 13, 35);
+        clock.set(TUESDAY, 13, 40);
         source.result = TODAY;
 
         assertEquals(YESTERDAY, quotes.forDisplay(CODE, Market.TWSE));
@@ -137,33 +137,17 @@ class QuoteRefreshTest {
     }
 
     @Test
-    void usesOnlyTwoSlotsAndKeepsTheirStateAcrossServiceRestart() {
-        seed(TUESDAY, YESTERDAY);
-        source.result = QuoteResult.unavailable();
-        clock.set(TUESDAY, 13, 34);
-        quotes.refreshPendingCloses();
-        assertEquals(0, source.calls);
-
-        clock.set(TUESDAY, 13, 35);
-        quotes.refreshPendingCloses();
-        assertEquals(1, source.calls);
-        assertEquals(YESTERDAY, quotes.forDisplay(CODE, Market.TWSE));
-
-        var restarted = new QuoteService(cache, officialQuotes, clock, workers, markets, batches);
-        clock.set(TUESDAY, 14, 5);
-        restarted.refreshPendingCloses();
-        clock.set(TUESDAY, 15, 4);
-        restarted.refreshPendingCloses();
-        assertEquals(1, source.calls);
-
-        clock.set(TUESDAY, 15, 5);
-        restarted.refreshPendingCloses();
-        assertEquals(2, source.calls);
-        clock.set(TUESDAY, 23, 59);
-        restarted.refreshPendingCloses();
-        assertEquals(2, source.calls);
-        assertEquals(YESTERDAY, restarted.forDisplay(CODE, Market.TWSE));
-        assertEquals(2, cache.find(TUESDAY, CODE).orElseThrow().postCloseAttempts());
+    void periodicRefreshKeepsItsRetryDeadlineAcrossServiceRestart() {
+        seed(TUESDAY,YESTERDAY);source.result=QuoteResult.unavailable();
+        clock.set(TUESDAY,13,39);quotes.refreshPendingCloses();assertEquals(0,source.calls);
+        clock.set(TUESDAY,13,40);quotes.refreshPendingCloses();assertEquals(1,source.calls);
+        var restarted=new QuoteService(cache,officialQuotes,clock,workers,markets,batches);
+        clock.set(TUESDAY,13,41);restarted.refreshPendingCloses();assertEquals(1,source.calls);
+        clock.set(TUESDAY,13,42);restarted.refreshPendingCloses();assertEquals(2,source.calls);
+        clock.set(TUESDAY,14,30);restarted.refreshPendingCloses();assertEquals(3,source.calls);
+        clock.set(TUESDAY,14,31);restarted.refreshPendingCloses();assertEquals(3,source.calls);
+        clock.set(TUESDAY,14,40);restarted.refreshPendingCloses();assertEquals(4,source.calls);
+        assertEquals(YESTERDAY,restarted.forDisplay(CODE,Market.TWSE));
     }
 
     @Test

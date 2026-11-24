@@ -73,6 +73,8 @@ class OfficialQuoteRateLimit {
             }
         }
 
+        Instant availableAt() { return pausedUntil; }
+
         void afterRequest() {
             completedAtNanos = nanoTime.getAsLong();
             delayAfterCompletion = delayNanos.getAsLong();

@@ -84,17 +84,21 @@ class QuoteCacheRepository {
                 market == null ? null : market.name(), market == null ? null : market.name()).stream().findFirst();
     }
 
+    boolean hasMarketPrice(Market market, LocalDate target) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM quote_cache WHERE market=? AND status='FOUND' AND price_date=? AND close_price>0",
+                Integer.class,market.name(),target)>0;
+    }
+
     List<DueCode> dueAfterClose(ZonedDateTime now) {
         return jdbc.query("""
                 SELECT h.code, COALESCE(c.market, h.market) AS market
                 FROM holdings h LEFT JOIN quote_cache c ON c.code = h.code AND c.lookup_date = ?
                 WHERE (c.status IS NULL OR c.status <> 'NOT_FOUND')
                     AND (c.price_date IS NULL OR c.price_date < ?)
-                    AND (c.last_attempt_at IS NULL OR c.last_attempt_at < ?)
                     AND (c.next_attempt_at IS NULL OR c.next_attempt_at <= ?)
                 ORDER BY c.next_attempt_at ASC NULLS FIRST, h.code
                 """, (row, index) -> new DueCode(row.getString("code"), readMarket(row)),
-                now.toLocalDate(), now.toLocalDate(), utc(QuoteRefreshPolicy.slotStart(now)), utc(now.toInstant()));
+                now.toLocalDate(), now.toLocalDate(), utc(now.toInstant()));
     }
 
     Optional<Entry> lastMarketAttempt(LocalDate day, Market market) {

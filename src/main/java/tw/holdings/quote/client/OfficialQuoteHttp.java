@@ -44,7 +44,11 @@ class OfficialQuoteHttp {
                 .build();
         var gate = rateLimit.gate(market);
         synchronized (gate) {
-            gate.beforeRequest(clock.instant());
+            try {
+                gate.beforeRequest(clock.instant());
+            } catch (IOException unavailable) {
+                throw new OfficialSourceUnavailableException(unavailable,gate.availableAt());
+            }
             String retryAfter = "";
             try {
                 var response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -59,7 +63,7 @@ class OfficialQuoteHttp {
                 return payload;
             } catch (IOException exception) {
                 gate.pause(clock.instant(), retryAfter);
-                throw exception;
+                throw new OfficialSourceUnavailableException(exception,gate.availableAt());
             } finally {
                 gate.afterRequest();
             }
