@@ -33,7 +33,7 @@ class MarketRefreshStateTest {
         official=mock(OfficialBatchQuoteClient.class);states=new QuoteMarketRefreshRepository(jdbc);
         cache=new QuoteCacheRepository(jdbc);service=restart();clock.set(13,40,0);
     }
-    BatchQuoteService restart(){return new BatchQuoteService(official,cache,clock,new TransactionTemplate(tm),states,new MarketRefreshPolicy(bound->0),new QuoteTargetDates(new TradingCalendarService(new TradingCalendarRepository(jdbc),"","")));}
+    BatchQuoteService restart(){return new BatchQuoteService(official,cache,clock,new TransactionTemplate(tm),states,new MarketRefreshPolicy(bound->0),new QuoteTargetDates(new TradingCalendarService(new TradingCalendarRepository(jdbc),"","")),mock(tw.holdings.quote.marketstatus.MarketStatusService.class));}
     IOException unpublished(){return new OfficialBatchQuoteClient.BatchUnavailable(new IOException("not published"),true,true);}
     OfficialBatchQuoteClient.Snapshot today(){return new OfficialBatchQuoteClient.Snapshot(DAY,Map.of("2330",QuoteResult.found("台積電",Market.TWSE,new BigDecimal("100"),DAY)));}
     @Test void firstJitterIsPersistedAndNormalRetryIsNotThirtyMinutes() throws Exception {

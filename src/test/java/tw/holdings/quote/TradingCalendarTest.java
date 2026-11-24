@@ -42,7 +42,7 @@ class TradingCalendarTest {
     }
     void fridayClosed() { for(var m:Market.values())repository.save(m,annual(2026,FRIDAY),clock.instant()); }
     BatchQuoteService batches(OfficialBatchQuoteClient official) {
-        return new BatchQuoteService(official,new QuoteCacheRepository(jdbc),clock,new TransactionTemplate(tm),new QuoteMarketRefreshRepository(jdbc),new MarketRefreshPolicy(b->0),dates);
+        return new BatchQuoteService(official,new QuoteCacheRepository(jdbc),clock,new TransactionTemplate(tm),new QuoteMarketRefreshRepository(jdbc),new MarketRefreshPolicy(b->0),dates,mock(tw.holdings.quote.marketstatus.MarketStatusService.class));
     }
     @Test void persistsWholeYearAndRestartKeepsKnownFridayHoliday() {
         fridayClosed();assertEquals(730,jdbc.queryForObject("SELECT COUNT(*) FROM quote_market_calendar",Integer.class));

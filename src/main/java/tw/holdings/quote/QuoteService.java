@@ -49,6 +49,10 @@ public class QuoteService {
         if (isDelisted(listing)) {
             return QuoteResult.notFound();
         }
+        if (conflictingMarket(day,code,listing)) {
+            markets.requestReview(code);
+            return QuoteResult.found(listing.name(),listing.market(),null,null);
+        }
         var today = dailyEntry(day, code, listing);
         if (today != null && today.result().status() != QuoteResult.Status.UNAVAILABLE) {
             if (today.result().status() == QuoteResult.Status.FOUND) {
@@ -81,6 +85,10 @@ public class QuoteService {
         var listing = markets.quoteListing(code, day).orElse(null);
         if (isDelisted(listing)) {
             return QuoteResult.notFound();
+        }
+        if (conflictingMarket(day,code,listing)) {
+            markets.requestReview(code);
+            return QuoteResult.found(listing.name(),listing.market(),null,null);
         }
         var today = dailyEntry(day, code, listing);
         if (today != null && day.equals(today.result().priceDate())) {
@@ -159,8 +167,10 @@ public class QuoteService {
         boolean postClose = QuoteRefreshPolicy.isPostClose(now);
         boolean onlyCurrentMonth = postClose && last != null && last.close() != null;
         QuoteResult result = batchQuotes.lookup(code, market).orElseGet(() ->
-                validation && batchQuotes.individualAllowed(market,day) ? officialQuotes.lookup(code, market, day, onlyCurrentMonth) : QuoteResult.unavailable());
-        if (listing != null && result.priceDate() != null && result.priceDate().isBefore(listing.effectiveDate())) {
+                (validation || listing!=null) && batchQuotes.individualAllowed(market,day) ? officialQuotes.lookup(code, market, day, onlyCurrentMonth) : QuoteResult.unavailable());
+        if (listing != null && result.status()==QuoteResult.Status.FOUND
+                && (result.market()!=listing.market() || result.priceDate()!=null && result.priceDate().isBefore(listing.effectiveDate()))) {
+            if(result.market()!=listing.market())markets.requestReview(code);
             result = QuoteResult.found(listing.name(), market, null, null);
         }
         if (result.status() == QuoteResult.Status.NOT_FOUND && market != null) {
@@ -188,6 +198,7 @@ public class QuoteService {
             return entry;
         }
         var result = entry.result();
+        if (result.status()==QuoteResult.Status.NOT_FOUND)return null;
         if (result.status() == QuoteResult.Status.FOUND
                 && (result.market() != listing.market()
                 || result.priceDate() != null && result.priceDate().isBefore(listing.effectiveDate()))) {
@@ -199,6 +210,14 @@ public class QuoteService {
     private Optional<QuoteResult> latestFound(LocalDate day, String code, ListingStatus listing) {
         return listing == null ? cache.latestFound(day, code)
                 : cache.latestFound(day, code, listing.effectiveDate(), listing.market());
+    }
+
+    private boolean conflictingMarket(LocalDate day,String code,ListingStatus listing) {
+        if(listing==null)return false;
+        if(markets.reviewPending(code))return true;
+        if(markets.marketReviewed(code,listing.market()))return false;
+        return cache.latestFound(day,code).filter(q->q.market()!=listing.market()
+                && q.priceDate()!=null && !q.priceDate().isBefore(listing.effectiveDate())).isPresent();
     }
 
     private boolean isDelisted(ListingStatus listing) {
