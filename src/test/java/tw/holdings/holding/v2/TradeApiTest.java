@@ -33,7 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {"spring.datasource.url=jdbc:h2:mem:v2-api-parity;DB_CLOSE_DELAY=-1",
-        "quotes.market-status-sync=false"})
+        "quotes.market-status-sync=false", "quotes.warmup-enabled=false", "quotes.calendar-sync-enabled=false"})
 @AutoConfigureMockMvc
 class TradeApiTest {
     @Autowired MockMvc mvc;

@@ -27,12 +27,13 @@ class BatchQuoteService {
     private final TransactionTemplate transactions;
     private final QuoteMarketRefreshRepository states;
     private final MarketRefreshPolicy policy;
+    private final QuoteTargetDates dates;
     private final Map<Market,Object> locks=new EnumMap<>(Market.class);
 
     BatchQuoteService(OfficialBatchQuoteClient official,QuoteCacheRepository cache,Clock clock,
-                      TransactionTemplate transactions,QuoteMarketRefreshRepository states,MarketRefreshPolicy policy) {
+                      TransactionTemplate transactions,QuoteMarketRefreshRepository states,MarketRefreshPolicy policy,QuoteTargetDates dates) {
         this.official=official;this.cache=cache;this.clock=clock;this.transactions=transactions;
-        this.states=states;this.policy=policy;
+        this.states=states;this.policy=policy;this.dates=dates;
         for (Market market:Market.values()) locks.put(market,new Object());
     }
 
@@ -46,8 +47,8 @@ class BatchQuoteService {
     }
 
     private Optional<QuoteResult> lookupMarket(String code,Market market) {
-        ensure(market,taipeiNow().toLocalDate());
-        return cache.find(taipeiNow().toLocalDate(),code).map(QuoteCacheRepository.Entry::result)
+        ensure(market,dates.latestExpected(market,taipeiNow()));
+        return cache.latestFound(taipeiNow().toLocalDate(),code)
                 .filter(r->r.status()==QuoteResult.Status.FOUND && r.market()==market);
     }
 
@@ -68,14 +69,18 @@ class BatchQuoteService {
                 && cache.hasMarketPrice(market,target);
     }
 
-    boolean ensure(Market market,LocalDate target) {
+    enum Outcome { AVAILABLE, NOT_PUBLISHED, WAITING }
+
+    boolean ensure(Market market,LocalDate target) { return warm(market,target)==Outcome.AVAILABLE; }
+
+    Outcome warm(Market market,LocalDate target) {
         synchronized (locks.get(market)) {
             var now=taipeiNow();
             var state=states.obtain(market,target,policy.firstAttempt(target));
-            if (published(market,target)) return true;
-            if (state.nextAttempt()!=null && now.toInstant().isBefore(state.nextAttempt())) return false;
+            if (published(market,target)) return Outcome.AVAILABLE;
+            if (state.nextAttempt()!=null && now.toInstant().isBefore(state.nextAttempt())) return Outcome.WAITING;
             if (target.equals(now.toLocalDate()) && !now.toLocalTime().isBefore(LocalTime.of(13,30))
-                    && now.toInstant().isBefore(state.windowStart())) return false;
+                    && now.toInstant().isBefore(state.windowStart())) return Outcome.WAITING;
             Instant normal=state.normalAttempt();
             if (normal==null && policy.normalWindow(now.toInstant(),state)) normal=now.toInstant();
             var attempted=new QuoteMarketRefreshRepository.State(market,target,state.windowStart(),now.toInstant(),
@@ -90,7 +95,7 @@ class BatchQuoteService {
                     cache.saveBatch(completed,snapshot.quotes());
                     remember(attempted,completed,true,!valid,false,null);
                 });
-                return valid;
+                return valid?Outcome.AVAILABLE:Outcome.NOT_PUBLISHED;
             } catch (InterruptedException error) {
                 Thread.currentThread().interrupt();
                 remember(attempted,taipeiNow(),false,true,true,null);
@@ -100,8 +105,9 @@ class BatchQuoteService {
                 Instant available=error instanceof OfficialSourceUnavailableException unavailable ? unavailable.availableAt():null;
                 LOGGER.warn("Official batch unavailable: market={}, target={}, reason={}",market,target,error.getClass().getSimpleName());
                 remember(attempted,taipeiNow(),recognized,true,transport,available);
+                if (error instanceof BatchUnavailable response && response.unpublished()) return Outcome.NOT_PUBLISHED;
             }
-            return false;
+            return Outcome.WAITING;
         }
     }
 

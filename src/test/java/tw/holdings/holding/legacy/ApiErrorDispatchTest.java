@@ -23,7 +23,7 @@ import static org.mockito.Mockito.when;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {"spring.datasource.url=jdbc:h2:mem:api-errors-test;DB_CLOSE_DELAY=-1",
-                "quotes.market-status-sync=false"})
+                "quotes.market-status-sync=false", "quotes.warmup-enabled=false", "quotes.calendar-sync-enabled=false"})
 @ExtendWith(OutputCaptureExtension.class)
 class ApiErrorDispatchTest {
     private static final String HOLDINGS = "/api/v1/holdings";

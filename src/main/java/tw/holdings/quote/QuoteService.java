@@ -57,11 +57,10 @@ public class QuoteService {
             return today.result();
         }
 
-        if (!QuoteRefreshPolicy.isWeekday(now)) {
-            var prior = latestFound(day, code, listing);
-            if (prior.isPresent()) {
-                return prior.get();
-            }
+        var prior=latestFound(day,code,listing);
+        if (prior.isPresent() && prior.get().name()!=null && prior.get().market()!=null) {
+            queueIfDue(code,knownMarket,now,today);
+            return prior.get();
         }
         if (!QuoteRefreshPolicy.canRefresh(now, today)) {
             return QuoteResult.unavailable();
