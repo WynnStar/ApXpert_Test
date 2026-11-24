@@ -28,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:utc-trade-api-test;DB_CLOSE_DELAY=-1",
-        "quotes.market-status-sync=false"
+        "quotes.market-status-sync=false", "quotes.warmup-enabled=false", "quotes.calendar-sync-enabled=false"
 })
 @AutoConfigureMockMvc
 class TradeApiTimezoneTest {

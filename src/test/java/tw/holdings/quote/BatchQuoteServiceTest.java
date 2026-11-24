@@ -56,10 +56,11 @@ class BatchQuoteServiceTest {
     @BeforeEach
     void setup() {
         jdbc.update("DELETE FROM quote_cache");
-        clock.current = DAY.atTime(10, 0).atZone(clock.getZone()).toInstant();
+        jdbc.update("DELETE FROM quote_market_refresh");
+        clock.current = DAY.atTime(14, 0).atZone(clock.getZone()).toInstant();
         official = mock(OfficialBatchQuoteClient.class);
         cache = new QuoteCacheRepository(jdbc);
-        batches = new BatchQuoteService(official, cache, clock, new TransactionTemplate(transactionManager));
+        batches = new BatchQuoteService(official, cache, clock, new TransactionTemplate(transactionManager), new QuoteMarketRefreshRepository(jdbc), new MarketRefreshPolicy(bound -> 0), new QuoteTargetDates(new TradingCalendarService(new TradingCalendarRepository(jdbc),"","")));
     }
 
     @Test
@@ -122,46 +123,44 @@ class BatchQuoteServiceTest {
     void failedBatchRetainsPricesAndSharesThirtyMinuteBackoffAcrossStocks() throws Exception {
         QuoteResult recent = QuoteResult.found("台積電", Market.TWSE, new BigDecimal("90.00"), DAY.minusDays(2));
         cache.save(DAY.minusDays(1), "2330", new QuoteCacheRepository.Entry(recent, 0, 0, clock.instant()), clock.instant());
+        clock.current=DAY.atTime(10,0).atZone(clock.getZone()).toInstant();
         when(official.fetch(eq(Market.TWSE), any())).thenThrow(new IOException("simulated failure"))
                 .thenReturn(snapshot(DAY.minusDays(1)));
 
-        assertTrue(batches.lookup("2330", Market.TWSE).isEmpty());
+        assertEquals(recent, batches.lookup("2330", Market.TWSE).orElseThrow());
         assertEquals(recent, cache.latestFound(DAY, "2330").orElseThrow());
         assertTrue(batches.lookup("0050", Market.TWSE).isEmpty());
         clock.current = clock.current.plusSeconds(1799);
         assertTrue(batches.lookup("0050", Market.TWSE).isEmpty());
-        verify(official, times(1)).fetch(Market.TWSE, DAY);
+        verify(official, times(1)).fetch(Market.TWSE, DAY.minusDays(1));
         clock.current = clock.current.plusSeconds(1);
         assertEquals(new BigDecimal("100.00"), batches.lookup("2330", Market.TWSE).orElseThrow().close());
-        verify(official, times(2)).fetch(Market.TWSE, DAY);
+        verify(official, times(2)).fetch(Market.TWSE, DAY.minusDays(1));
     }
 
     @Test
-    void marketSlotsRemainSharedAcrossStocksAndApplicationRestart() throws Exception {
-        when(official.fetch(eq(Market.TWSE), any())).thenReturn(snapshot(DAY.minusDays(1)));
-        clock.current = DAY.atTime(14, 20).atZone(clock.getZone()).toInstant();
-        assertTrue(batches.lookup("2330", Market.TWSE).isPresent());
-
-        var restarted = new BatchQuoteService(official, cache, clock, new TransactionTemplate(transactionManager));
-        clock.current = DAY.atTime(14, 30).atZone(clock.getZone()).toInstant();
-        assertTrue(restarted.lookup("0050", Market.TWSE).isPresent());
-        verify(official, times(1)).fetch(Market.TWSE, DAY);
-
-        clock.current = DAY.atTime(15, 5).atZone(clock.getZone()).toInstant();
-        assertTrue(restarted.lookup("0050", Market.TWSE).isPresent());
-        verify(official, times(2)).fetch(Market.TWSE, DAY);
-
-        var afterSecondRestart = new BatchQuoteService(official, cache, clock, new TransactionTemplate(transactionManager));
-        clock.current = DAY.atTime(16, 0).atZone(clock.getZone()).toInstant();
-        assertTrue(afterSecondRestart.lookup("2330", Market.TWSE).isPresent());
-        verify(official, times(2)).fetch(Market.TWSE, DAY);
+    void marketRetryDeadlineRemainsSharedAcrossStocksAndApplicationRestart() throws Exception {
+        when(official.fetch(eq(Market.TWSE),any())).thenReturn(snapshot(DAY.minusDays(1)));
+        clock.current=DAY.atTime(14,20).atZone(clock.getZone()).toInstant();
+        assertTrue(batches.lookup("2330",Market.TWSE).isPresent());
+        var restarted=new BatchQuoteService(official,cache,clock,new TransactionTemplate(transactionManager),new QuoteMarketRefreshRepository(jdbc),new MarketRefreshPolicy(bound->0),new QuoteTargetDates(new TradingCalendarService(new TradingCalendarRepository(jdbc),"","")));
+        clock.current=clock.current.plusSeconds(119);
+        assertTrue(restarted.lookup("0050",Market.TWSE).isPresent());
+        verify(official,times(1)).fetch(Market.TWSE,DAY);
+        clock.current=clock.current.plusSeconds(1);
+        restarted.lookup("0050",Market.TWSE);
+        verify(official,times(2)).fetch(Market.TWSE,DAY);
+        clock.current=DAY.atTime(14,40).atZone(clock.getZone()).toInstant();
+        restarted.lookup("0050",Market.TWSE);
+        var state=new QuoteMarketRefreshRepository(jdbc).find(Market.TWSE,DAY).orElseThrow();
+        assertEquals(DAY.atTime(14,50).atZone(clock.getZone()).toInstant(),state.nextAttempt());
     }
 
     @Test
     void requestThatFinishesAfterFirstSlotRecordsTheCompletionTime() throws Exception {
-        clock.current = DAY.atTime(13, 34).atZone(clock.getZone()).toInstant();
+        clock.current = DAY.atTime(13, 29).atZone(clock.getZone()).toInstant();
         when(official.fetch(eq(Market.TWSE), any())).thenAnswer(call -> {
-            clock.current = DAY.atTime(13, 36).atZone(clock.getZone()).toInstant();
+            clock.current = DAY.atTime(13, 41).atZone(clock.getZone()).toInstant();
             return snapshot(DAY.minusDays(1));
         });
 
@@ -169,12 +168,12 @@ class BatchQuoteServiceTest {
         var entry = cache.find(DAY, "2330").orElseThrow();
         assertEquals(clock.instant(), entry.lastAttemptAt());
         assertEquals(1, entry.postCloseAttempts());
-        assertEquals(DAY.atTime(15, 5).atZone(clock.getZone()).toInstant(), entry.nextAttemptAt());
+        assertEquals(DAY.atTime(13, 43).atZone(clock.getZone()).toInstant(), entry.nextAttemptAt());
 
-        var restarted = new BatchQuoteService(official, cache, clock, new TransactionTemplate(transactionManager));
-        clock.current = DAY.atTime(14, 0).atZone(clock.getZone()).toInstant();
+        var restarted = new BatchQuoteService(official, cache, clock, new TransactionTemplate(transactionManager), new QuoteMarketRefreshRepository(jdbc), new MarketRefreshPolicy(bound -> 0), new QuoteTargetDates(new TradingCalendarService(new TradingCalendarRepository(jdbc),"","")));
+        clock.current = DAY.atTime(13, 42).atZone(clock.getZone()).toInstant();
         assertTrue(restarted.lookup("0050", Market.TWSE).isPresent());
-        verify(official, times(1)).fetch(Market.TWSE, DAY);
+        verify(official, times(1)).fetch(Market.TWSE, DAY.minusDays(1));
     }
 
     @Test
@@ -245,7 +244,7 @@ class BatchQuoteServiceTest {
         }).when(batchJdbc).batchUpdate(any(String.class), org.mockito.ArgumentMatchers.<Object[]>anyList());
         var raceCache = new QuoteCacheRepository(batchJdbc);
         var raceBatch = new BatchQuoteService(official, raceCache, clock,
-                new TransactionTemplate(transactionManager));
+                new TransactionTemplate(transactionManager), new QuoteMarketRefreshRepository(jdbc), new MarketRefreshPolicy(bound -> 0), new QuoteTargetDates(new TradingCalendarService(new TradingCalendarRepository(jdbc),"","")));
         when(official.fetch(eq(Market.TWSE), any())).thenReturn(snapshot(DAY.minusDays(1)));
 
         assertEquals(latest, raceBatch.lookup("2330", Market.TWSE).orElseThrow());

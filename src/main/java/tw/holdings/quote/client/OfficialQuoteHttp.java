@@ -37,6 +37,19 @@ class OfficialQuoteHttp {
     }
 
     JsonNode fetchDocument(Market market, String url) throws IOException, InterruptedException {
+        return fetchDocument(market,url,false);
+    }
+
+    JsonNode fetchOptionalDocument(Market market,String url) throws IOException,InterruptedException {
+        return fetchDocument(market,url,true);
+    }
+
+    private static class OptionalDocumentException extends IOException {
+        private static final long serialVersionUID=1L;
+        OptionalDocumentException(String message) { super(message); }
+    }
+
+    private JsonNode fetchDocument(Market market,String url,boolean optional) throws IOException,InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(URI.create(url))
                 .header("Accept", "application/json")
                 .timeout(Duration.ofSeconds(4))
@@ -44,11 +57,17 @@ class OfficialQuoteHttp {
                 .build();
         var gate = rateLimit.gate(market);
         synchronized (gate) {
-            gate.beforeRequest(clock.instant());
+            try {
+                gate.beforeRequest(clock.instant());
+            } catch (IOException unavailable) {
+                throw new OfficialSourceUnavailableException(unavailable,gate.availableAt());
+            }
             String retryAfter = "";
             try {
                 var response = client.send(request, HttpResponse.BodyHandlers.ofString());
                 retryAfter = response.headers().firstValue("Retry-After").orElse("");
+                if (optional && (response.statusCode()==400 || response.statusCode()==404))
+                    throw new OptionalDocumentException("Calendar endpoint HTTP "+response.statusCode());
                 if (response.statusCode() != 200) {
                     throw new IOException("HTTP " + response.statusCode());
                 }
@@ -57,9 +76,11 @@ class OfficialQuoteHttp {
                     throw new IOException("Empty official response");
                 }
                 return payload;
+            } catch (OptionalDocumentException metadataUnavailable) {
+                throw metadataUnavailable;
             } catch (IOException exception) {
                 gate.pause(clock.instant(), retryAfter);
-                throw exception;
+                throw new OfficialSourceUnavailableException(exception,gate.availableAt());
             } finally {
                 gate.afterRequest();
             }

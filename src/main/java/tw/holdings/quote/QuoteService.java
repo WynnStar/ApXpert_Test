@@ -57,11 +57,10 @@ public class QuoteService {
             return today.result();
         }
 
-        if (!QuoteRefreshPolicy.isWeekday(now)) {
-            var prior = latestFound(day, code, listing);
-            if (prior.isPresent()) {
-                return prior.get();
-            }
+        var prior=latestFound(day,code,listing);
+        if (prior.isPresent() && prior.get().name()!=null && prior.get().market()!=null) {
+            queueIfDue(code,knownMarket,now,today);
+            return prior.get();
         }
         if (!QuoteRefreshPolicy.canRefresh(now, today)) {
             return QuoteResult.unavailable();
@@ -96,7 +95,7 @@ public class QuoteService {
                 : QuoteResult.found(listing.name(), listing.market(), null, null);
     }
 
-    @Scheduled(fixedDelay = 30_000)
+    @Scheduled(fixedDelayString = "${quotes.refresh-check-ms:5000}")
     void refreshPendingCloses() {
         ZonedDateTime now = taipeiNow();
         if (QuoteRefreshPolicy.isPostClose(now)) {
@@ -160,7 +159,7 @@ public class QuoteService {
         boolean postClose = QuoteRefreshPolicy.isPostClose(now);
         boolean onlyCurrentMonth = postClose && last != null && last.close() != null;
         QuoteResult result = batchQuotes.lookup(code, market).orElseGet(() ->
-                validation ? officialQuotes.lookup(code, market, day, onlyCurrentMonth) : QuoteResult.unavailable());
+                validation && batchQuotes.individualAllowed(market,day) ? officialQuotes.lookup(code, market, day, onlyCurrentMonth) : QuoteResult.unavailable());
         if (listing != null && result.priceDate() != null && result.priceDate().isBefore(listing.effectiveDate())) {
             result = QuoteResult.found(listing.name(), market, null, null);
         }
@@ -174,6 +173,10 @@ public class QuoteService {
         int attempts = (entry == null ? 0 : entry.postCloseAttempts())
                 + (QuoteRefreshPolicy.isPostClose(completed) ? 1 : 0);
         var next = QuoteRefreshPolicy.nextAttemptAt(completed, failed);
+        Market refreshMarket=market!=null?market:result.market();
+        if (refreshMarket!=null) {
+            next=batchQuotes.nextAttempt(refreshMarket,day).orElse(next);
+        }
         QuoteResult retained = keepLatest(result, last);
         cache.save(day, code, new QuoteCacheRepository.Entry(retained, failures, attempts, next, completed.toInstant()), completed.toInstant());
         return failed ? result : retained;

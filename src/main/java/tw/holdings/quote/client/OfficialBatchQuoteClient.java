@@ -19,6 +19,17 @@ public class OfficialBatchQuoteClient {
         }
     }
 
+    public static final class BatchUnavailable extends IOException {
+        private static final long serialVersionUID=1L;
+        private final boolean recognizable;
+        private final boolean unpublished;
+        public BatchUnavailable(IOException cause,boolean recognizable,boolean unpublished) {
+            super(cause);this.recognizable=recognizable;this.unpublished=unpublished;
+        }
+        public boolean recognizable() { return recognizable; }
+        public boolean unpublished() { return unpublished; }
+    }
+
     private final OfficialQuoteHttp http;
     private final String twseUrl;
     private final String tpexUrl;
@@ -40,6 +51,14 @@ public class OfficialBatchQuoteClient {
                 .replaceQueryParam("type", twse ? "ALLBUT0999" : "EW")
                 .replaceQueryParam("response", "json")
                 .build().encode().toUriString();
-        return BatchQuoteParser.parse(http.fetchDocument(market, url), market, taipeiDate);
+        var document=http.fetchDocument(market,url);
+        try {
+            return BatchQuoteParser.parse(document,market,taipeiDate);
+        } catch (IOException error) {
+            boolean unpublished=error instanceof UnpublishedBatchException;
+            boolean recognizable=unpublished || document.isObject()
+                    && document.path("stat").isTextual() && document.path("stat").asText().equalsIgnoreCase("ok");
+            throw new BatchUnavailable(error,recognizable,unpublished);
+        }
     }
 }

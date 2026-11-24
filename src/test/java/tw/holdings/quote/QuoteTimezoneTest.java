@@ -51,10 +51,10 @@ class QuoteTimezoneTest {
 
     @ParameterizedTest
     @CsvSource({
-        "2026-11-17T05:34:59Z, 0",
-        "2026-11-17T05:35:00Z, 1",
-        "2026-11-17T07:04:59Z, 1",
-        "2026-11-17T07:05:00Z, 2",
+        "2026-11-17T05:39:59Z, 0",
+        "2026-11-17T05:40:00Z, 1",
+        "2026-11-17T06:29:59Z, 1",
+        "2026-11-17T06:30:00Z, 2",
         "2026-11-20T16:00:00Z, 0"
     })
     void refreshSchedulerUsesTaipeiSlotsAndTaipeiWeekend(String instant, int slot) {
@@ -71,15 +71,15 @@ class QuoteTimezoneTest {
             verifyNoInteractions(cache);
         } else {
             verify(cache).dueAfterClose(taipei);
-            assertEquals(Instant.parse(slot == 1 ? "2026-11-17T05:35:00Z" : "2026-11-17T07:05:00Z"),
+            assertEquals(Instant.parse(slot == 1 ? "2026-11-17T05:40:00Z" : "2026-11-17T06:30:00Z"),
                     QuoteRefreshPolicy.slotStart(taipei));
         }
     }
 
     @Test
-    void nextRefreshAfterFridaySecondSlotIsMonday1335Taipei() {
-        ZonedDateTime friday = Instant.parse("2026-11-20T07:05:00Z").atZone(QuoteRefreshPolicy.TAIPEI);
-        assertEquals(Instant.parse("2026-11-23T05:35:00Z"),
+    void lateFridayStillHasLowFrequencyChecks() {
+        ZonedDateTime friday = Instant.parse("2026-11-20T06:30:00Z").atZone(QuoteRefreshPolicy.TAIPEI);
+        assertEquals(Instant.parse("2026-11-20T06:40:00Z"),
                 QuoteRefreshPolicy.nextAttemptAt(friday, false));
     }
 }

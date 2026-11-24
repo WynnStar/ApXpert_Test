@@ -18,12 +18,22 @@ final class BatchQuoteParser {
 
     static OfficialBatchQuoteClient.Snapshot parse(JsonNode document, Market market, LocalDate requestedDate)
             throws IOException {
+        if (document != null && document.isObject() && document.path("stat").isTextual()
+                && document.path("stat").asText().contains("沒有符合")) {
+            throw new UnpublishedBatchException("Official batch is not published");
+        }
+        if (document != null && document.isObject() && "無資料".equals(document.path("stat").asText())) {
+            throw new UnpublishedBatchException("Official batch is not published");
+        }
         if (document == null || !document.isObject() || !document.path("stat").isTextual()
                 || !document.path("stat").asText().equalsIgnoreCase("ok")) {
             throw new IOException("Official batch is unavailable or not published");
         }
         LocalDate date = reportDate(text(document.get("date"), "report date"));
         if (!requestedDate.equals(date)) {
+            if (date.isBefore(requestedDate)) {
+                throw new UnpublishedBatchException("Official batch date is older than requested date");
+            }
             throw new IOException("Official batch date does not match requested Taipei date");
         }
         var labels = market == Market.TWSE
@@ -36,7 +46,7 @@ final class BatchQuoteParser {
         JsonNode rows = table.get("data");
         if (rows == null || !rows.isArray() || rows.isEmpty()) {
             // 有今天日期與 stat=ok 的空表，仍不代表已公布行情。
-            throw new IOException("Official batch contains no published quote rows");
+            throw new UnpublishedBatchException("Official batch contains no published quote rows");
         }
         if (table.has("totalCount") && (!table.get("totalCount").isIntegralNumber()
                 || !table.get("totalCount").canConvertToInt()
@@ -69,7 +79,7 @@ final class BatchQuoteParser {
             priced |= traded;
         }
         if (!priced) {
-            throw new IOException("Official batch contains no valid closing prices");
+            throw new UnpublishedBatchException("Official batch contains no valid closing prices");
         }
         return new OfficialBatchQuoteClient.Snapshot(date, quotes);
     }
