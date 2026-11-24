@@ -34,7 +34,7 @@ class QuoteWarmupTest {
     @BeforeEach void setup() {
         jdbc.update("DELETE FROM quote_cache");jdbc.update("DELETE FROM quote_market_refresh");
         official=mock(OfficialBatchQuoteClient.class);clock=Clock.fixed(SATURDAY.atTime(10,0).atZone(QuoteRefreshPolicy.TAIPEI).toInstant(),ZoneOffset.UTC);
-        cache=new QuoteCacheRepository(jdbc);dates=new QuoteTargetDates();workers=mock(ExecutorService.class);
+        cache=new QuoteCacheRepository(jdbc);dates=new QuoteTargetDates(new TradingCalendarService(new TradingCalendarRepository(jdbc),"",""));workers=mock(ExecutorService.class);
         doAnswer(call->{call.<Runnable>getArgument(0).run();return null;}).when(workers).execute(any(Runnable.class));
         batches=new BatchQuoteService(official,cache,clock,new TransactionTemplate(tm),new QuoteMarketRefreshRepository(jdbc),new MarketRefreshPolicy(bound->0),dates);
     }

@@ -47,7 +47,7 @@ class BatchQuoteService {
     }
 
     private Optional<QuoteResult> lookupMarket(String code,Market market) {
-        ensure(market,dates.latestExpected(market,taipeiNow()));
+        if (dates.ready(market)) ensure(market,dates.latestExpected(market,taipeiNow()));
         return cache.latestFound(taipeiNow().toLocalDate(),code)
                 .filter(r->r.status()==QuoteResult.Status.FOUND && r.market()==market);
     }
@@ -57,8 +57,10 @@ class BatchQuoteService {
     }
 
     boolean individualAllowed(Market market,LocalDate day) {
+        if (market!=null && dates.closed(market,day)) return true;
+        if (market==null && java.util.Arrays.stream(Market.values()).allMatch(m->dates.closed(m,day))) return true;
         LocalTime time=taipeiNow().toLocalTime();
-        if (!QuoteRefreshPolicy.isWeekday(taipeiNow()) || time.isBefore(LocalTime.of(13,30))
+        if (time.isBefore(LocalTime.of(13,30))
                 || !time.isBefore(LocalTime.of(14,30))) return true;
         if (market!=null) return published(market,day);
         return java.util.Arrays.stream(Market.values()).allMatch(m->published(m,day));

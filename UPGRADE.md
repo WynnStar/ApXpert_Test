@@ -69,7 +69,7 @@ Linux 可用 sha256sum "$OLD_JAR" "$NEW_JAR"，macOS 可用 shasum -a 256 "$OLD_
 
 ## 2. 資料庫會發生什麼變動
 
-v1.0.0 包含 V1～V3，持股表、行情快取表及 Flyway 歷史表共三張。新版啟動時，Flyway 會自動執行 V4～V11。Hibernate 使用 ddl-auto=validate，SQL 初始化為 never，由 migration 負責結構變更。
+v1.0.0 包含 V1～V3，持股表、行情快取表及 Flyway 歷史表共三張。新版啟動時，Flyway 會自動執行 V4～V12。Hibernate 使用 ddl-auto=validate，SQL 初始化為 never，由 migration 負責結構變更。
 
 | Migration | 變動 | 對資料的影響 |
 | --- | --- | --- |
@@ -81,8 +81,9 @@ v1.0.0 包含 V1～V3，持股表、行情快取表及 Flyway 歷史表共三張
 | V9 | 新增 tpex_delisting_archive_year | 記錄已載入的櫃買歷史下櫃年度 |
 | V10 | 新增 tpex_listing_transfer_year | 記錄已載入的上櫃轉上市年度 |
 | V11 | 新增 quote_market_refresh | 保存每市場、目標交易日的首次偏移、重試期限、恢復窗口與完成狀態 |
+| V12 | 新增 quote_market_calendar | 依市場保存官方年度開休市狀態、來源與確認時間 |
 
-完成 V11 後，應有十張應用程式表，加上 flyway_schema_history 共十一張。索引或 migration 檔案數量不等於資料表數。
+完成 V12 後，應有十一張應用程式表，加上 flyway_schema_history 共十二張。索引或 migration 檔案數量不等於資料表數。
 
 舊持股 id、code、lots、buy_price 保留。例如 id=12、0050、2 張、150 元，升級後仍能由 App 1.0 取得相同 id 與張數。2.0 則從 OPENING 算出 2,000 股，含買進手續費的成本為 300,427 元。原始資料沒有買進日期，期初交易日期為 null，不會捏造歷史日期。
 
@@ -166,7 +167,7 @@ java -jar "$NEW_JAR" --server.port=8080 "--spring.datasource.url=jdbc:h2:file:$D
 
 帳密透過既有部署設定或 SPRING_DATASOURCE_USERNAME、SPRING_DATASOURCE_PASSWORD 環境變數提供。請沿用該資料庫既有帳密，避免在版本切換時意外換帳號。機密設定以私有方式保存。
 
-等待 Flyway 執行完成，日誌應顯示 V4～V11 成功套用，以及 Spring Boot 完成啟動。已是新版資料庫時會驗證現有 migration，重啟不應再補一次 OPENING。若路徑不存在、資料庫被鎖住、帳密不符、migration 或結構驗證失敗，先保留日誌並依第 7 節處理。
+等待 Flyway 執行完成，日誌應顯示 V4～V12 成功套用，以及 Spring Boot 完成啟動。已是新版資料庫時會驗證現有 migration，重啟不應再補一次 OPENING。若路徑不存在、資料庫被鎖住、帳密不符、migration 或結構驗證失敗，先保留日誌並依第 7 節處理。
 
 直接停機複製已關閉的 .mv.db 可建立 H2 冷備份。Migration 失敗可能留下部分結構變更，因此回復流程以完整的升級前備份為準。H2 與 Flyway 的備份、交易行為請參閱文末官方說明。
 
@@ -260,6 +261,7 @@ java -jar "$OLD_JAR" --server.port=8080 "--spring.datasource.url=jdbc:h2:file:$D
 | 行情刷新 | 平日台北 13:40 加 15～30 秒偏移開始，14:30 前每 2 分鐘加偏移；之後每 10 分鐘加偏移低頻補查。取得今日批次即停止；來源冷卻、Retry-After 優先 |
 | 市場狀態同步 | 台北時間每日 08:00 排程。08:00 後啟動時會提交補同步，歷史下櫃與轉板資料由背景作業載入 |
 | 官方連線 | 同來源完成後隨機間隔 30～60 秒，連線或 HTTP 失敗至少冷卻 30 分鐘，Retry-After 更晚時遵守標頭。首次歷史同步可能較久，需觀察日誌 |
+| 官方日曆 | V12 保存年度開休市日，兩市場各自同步；完整解析成功才替換，臨時停市另由覆寫設定處理 |
 | 啟動預熱 | 沒有行情時，即使週末、沒有持股也會背景補最近交易日。quotes.warmup-enabled 預設啟用，lookback 預設 14；已有有效資料不重查 |
 | H2 部署 | 檔案模式一次執行一個應用程式。資料存於固定、可寫入且持續保存的路徑 |
 | 備份 | 定期做可回復的資料備份，另保留對應程式版本，資料檔、備份與機密設定放在 repo 外 |
@@ -272,7 +274,11 @@ HTTP 來源冷卻門閂位於程序記憶體，重啟會重設；刷新期限及
 首次驗證可能受來源等待影響而先回 503，詳見 API.md。更新窗口針對收盤後批次，
 暖機、新代號驗證與歷史同步仍可能有其他請求。
 
-目前只用週末與時段判斷收盤後刷新，沒有完整的交易所休市日曆。不要將缺少當日價格直接判定為股票下市。正式機器的時間與時區設定也應正確。
+V12 保存兩市場指定年度的官方日曆。啟動時背景同步，成功資料快取 24 小時，失敗保留舊表，
+未知平日仍允許有限行情回查。週五已知休市時，週六以週四（或更早的最近交易日）為預熱目標。
+颱風等臨時停市需查證公告後，以 quotes.calendar-closed-dates 覆寫，例外開市可用
+quotes.calendar-open-dates；重啟後生效，詳細來源與測試主機設定見 README。
+不可將缺少價格判定為全市場休市或股票下市。正式機器時間需正確，排程固定採台北時區。
 
 App 2.0 可透過 GET /api/v2/summary 查總計，透過交易清單的 id 發出 PUT 更正交易，
 並透過 DELETE /api/v2/holdings/{id} 刪除整檔持股。DELETE 成功的 204 沒有 JSON body。

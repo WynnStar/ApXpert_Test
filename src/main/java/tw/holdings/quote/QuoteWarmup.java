@@ -36,7 +36,7 @@ class QuoteWarmup {
     void tick() {
         var now=clock.instant().atZone(QuoteRefreshPolicy.TAIPEI);
         for (Market market:Market.values()) {
-            if (cache.hasMarketPrice(market,dates.latestExpected(market,now)) || !pending.add(market)) continue;
+            if (!dates.ready(market) || cache.hasMarketPrice(market,dates.latestExpected(market,now)) || !pending.add(market)) continue;
             try {
                 workers.execute(()->{
                     try { fill(market); }
