@@ -40,10 +40,7 @@ class MarketStatusSyncService {
             var held = new HashSet<>(repository.heldCodes());
             var backfilled = loadTpexYears(day, held, daily);
             if (daily) {
-                for (Market market : Market.values()) {
-                    importRows("active listings " + market, () -> official.listings(market),
-                            listing -> reconcileListing(listing, day));
-                }
+                refreshListings(day);
                 for (String code : held.stream().sorted().toList()) {
                     if (!backfilled.contains(code)) {
                         refreshHistory(code, day);
@@ -120,23 +117,29 @@ class MarketStatusSyncService {
         repository.save(MarketEvent.fromOfficial(event));
     }
 
-    private void reconcileListing(OfficialMarketClient.Listing listing, LocalDate day) {
-        if (listing.date().isAfter(day)) {
-            return;
+    void reviewPending(LocalDate day) {
+        var pending=status.claimListingReviews();
+        if(pending.isEmpty())return;
+        try {
+            refreshListings(day);
+            pending.stream().filter(status::reviewPending).forEach(status::requestReview);
+        } catch(InterruptedException interrupted) {
+            pending.forEach(status::requestReview);
+            Thread.currentThread().interrupt();
         }
-        var previous = repository.identity(listing.code()).orElse(null);
-        var latest = status.listingEvent(listing.code(), day).orElse(null);
-        if (latest != null && latest.kind() == MarketEvent.Kind.DELISTED) {
-            if (previous != null && previous.issuerId().equals(listing.issuer())
-                    && previous.listedOn().isBefore(latest.date()) && !listing.date().isBefore(latest.date())) {
-                repository.save(new MarketEvent(listing.code(), listing.market(), listing.date(),
-                        MarketEvent.Kind.RELISTED, listing.name()));
+    }
+
+    private boolean refreshListings(LocalDate day) throws InterruptedException {
+        var rosters=new java.util.EnumMap<Market,List<OfficialMarketClient.Listing>>(Market.class);
+        for(var market:Market.values()) {
+            try { rosters.put(market,official.listings(market)); }
+            catch(IOException | RuntimeException unavailable) {
+                LOGGER.warn("Official listing roster unavailable: market={}",market);
             }
-            return;
         }
-        if (previous == null) {
-            repository.saveIdentity(listing.code(), new MarketStatusRepository.Identity(listing.issuer(), listing.date()));
-        }
+        if(rosters.size()!=Market.values().length)return false;
+        new MarketListingReconciler(repository,status).reconcile(rosters,day);
+        return true;
     }
 
     private <T> boolean importRows(String label, OfficialRows<T> load, Consumer<T> save) throws InterruptedException {

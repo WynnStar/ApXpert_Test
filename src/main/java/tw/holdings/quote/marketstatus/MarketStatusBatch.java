@@ -34,6 +34,16 @@ class MarketStatusBatch {
         }
     }
 
+    @Scheduled(fixedDelayString="${quotes.market-review-check-ms:300000}")
+    void review() {
+        try { quoteWorkers.execute(this::reviewIfDue); }
+        catch(java.util.concurrent.RejectedExecutionException busy) { /* 下輪再檢查，不丟失佇列。 */ }
+    }
+
+    private synchronized void reviewIfDue() {
+        synchronization.reviewPending(now().toLocalDate());
+    }
+
     private synchronized void runIfDue() {
         var now = now();
         if (!now.toLocalTime().isBefore(RUN_AT)) {
