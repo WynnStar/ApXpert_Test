@@ -36,7 +36,7 @@ class QuoteWarmupTest {
         official=mock(OfficialBatchQuoteClient.class);clock=Clock.fixed(SATURDAY.atTime(10,0).atZone(QuoteRefreshPolicy.TAIPEI).toInstant(),ZoneOffset.UTC);
         cache=new QuoteCacheRepository(jdbc);dates=new QuoteTargetDates(new TradingCalendarService(new TradingCalendarRepository(jdbc),"",""));workers=mock(ExecutorService.class);
         doAnswer(call->{call.<Runnable>getArgument(0).run();return null;}).when(workers).execute(any(Runnable.class));
-        batches=new BatchQuoteService(official,cache,clock,new TransactionTemplate(tm),new QuoteMarketRefreshRepository(jdbc),new MarketRefreshPolicy(bound->0),dates);
+        batches=new BatchQuoteService(official,cache,clock,new TransactionTemplate(tm),new QuoteMarketRefreshRepository(jdbc),new MarketRefreshPolicy(bound->0),dates,mock(tw.holdings.quote.marketstatus.MarketStatusService.class));
     }
     OfficialBatchQuoteClient.Snapshot snapshot(Market market,LocalDate day){
         String code=market==Market.TWSE?"2330":"6488";

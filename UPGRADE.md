@@ -313,3 +313,12 @@ v1 的逐檔轉版方案仍會對已轉版持股回 409 HOLDING_REQUIRES_V2，�
 H2 官方文件說明執行中的資料庫與關閉後檔案的備份方式。 [H2 升級、備份及回復](https://h2database.com/html/tutorial.html#backup)
 
 Flyway migration 的失敗回滾取決於資料庫和 DDL 的交易支援，升級流程需要保留完整回復點。 [Flyway migration 交易處理](https://documentation.red-gate.com/flyway/flyway-concepts/migrations/migration-transaction-handling)
+
+
+### 市場轉板修正
+
+此修正沿用 market_event、market_identity 及 quote_cache，沒有新增 migration。
+升級後需讓市場同步完成，才會以雙市場有效公司名單補正符合條件的轉板事件。
+不會只憑新市場報價就變更公司身分；疑似代號重用或來源矛盾仍需人工確認。
+行情市場衝突時會排背景核對，確認前價格可能顯示未取得。詳細核對時程與
+個股補查限制見 README 的「轉上市／轉上櫃與行情市場核對」。

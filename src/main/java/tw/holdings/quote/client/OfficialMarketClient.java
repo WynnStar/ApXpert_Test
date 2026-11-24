@@ -61,6 +61,7 @@ public class OfficialMarketClient {
                 listings.add(new Listing(code, market, date(listed), issuer, name));
             }
         }
+        if(listings.isEmpty())throw new IOException("Official listing roster contains no valid identities");
         return listings;
     }
 

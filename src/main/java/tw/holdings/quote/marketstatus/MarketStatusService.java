@@ -21,11 +21,20 @@ public class MarketStatusService {
 
     private final MarketStatusRepository repository;
     private final Clock clock;
+    private final MarketListingReviews reviews;
 
     MarketStatusService(MarketStatusRepository repository, Clock clock) {
         this.repository = repository;
         this.clock = clock;
+        this.reviews=new MarketListingReviews(clock);
     }
+
+    /** 只排隊核對，不在使用者請求內下載名單或直接改市場。 */
+    public void requestReview(String code) { reviews.request(code); }
+    public boolean reviewPending(String code) { return reviews.pending(code); }
+    public boolean marketReviewed(String code,Market market) { return reviews.verified(code,market); }
+    void confirmReview(String code,Market market) { reviews.confirm(code,market); }
+    java.util.Set<String> claimListingReviews() { return reviews.claim(); }
 
     public Optional<LocalDate> firstListingDate(String code) {
         return repository.identity(code).map(MarketStatusRepository.Identity::listedOn)

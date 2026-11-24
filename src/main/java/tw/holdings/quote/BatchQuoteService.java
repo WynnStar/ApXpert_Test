@@ -28,12 +28,13 @@ class BatchQuoteService {
     private final QuoteMarketRefreshRepository states;
     private final MarketRefreshPolicy policy;
     private final QuoteTargetDates dates;
+    private final tw.holdings.quote.marketstatus.MarketStatusService markets;
     private final Map<Market,Object> locks=new EnumMap<>(Market.class);
 
     BatchQuoteService(OfficialBatchQuoteClient official,QuoteCacheRepository cache,Clock clock,
-                      TransactionTemplate transactions,QuoteMarketRefreshRepository states,MarketRefreshPolicy policy,QuoteTargetDates dates) {
+                      TransactionTemplate transactions,QuoteMarketRefreshRepository states,MarketRefreshPolicy policy,QuoteTargetDates dates,tw.holdings.quote.marketstatus.MarketStatusService markets) {
         this.official=official;this.cache=cache;this.clock=clock;this.transactions=transactions;
-        this.states=states;this.policy=policy;this.dates=dates;
+        this.states=states;this.policy=policy;this.dates=dates;this.markets=markets;
         for (Market market:Market.values()) locks.put(market,new Object());
     }
 
@@ -48,8 +49,7 @@ class BatchQuoteService {
 
     private Optional<QuoteResult> lookupMarket(String code,Market market) {
         if (dates.ready(market)) ensure(market,dates.latestExpected(market,taipeiNow()));
-        return cache.latestFound(taipeiNow().toLocalDate(),code)
-                .filter(r->r.status()==QuoteResult.Status.FOUND && r.market()==market);
+        return cache.latestFound(taipeiNow().toLocalDate(),code,null,market);
     }
 
     Optional<Instant> nextAttempt(Market market,LocalDate target) {
@@ -94,6 +94,12 @@ class BatchQuoteService {
                 boolean valid=target.equals(snapshot.priceDate()) && snapshot.quotes().values().stream()
                         .anyMatch(q->target.equals(q.priceDate()) && q.close()!=null && q.close().signum()>0);
                 transactions.executeWithoutResult(status->{
+                    snapshot.quotes().forEach((code,quote)->{
+                        if(quote.market()!=market)throw new IllegalArgumentException("Batch market mismatch");
+                        var listing=markets.quoteListing(code,target).orElse(null);
+                        if(listing!=null && (listing.delisted() || listing.market()!=market))markets.requestReview(code);
+                    });
+                    // 行情本身不更改市場事件；讀取層會隔離尚未核對的跨市場價格。
                     cache.saveBatch(completed,snapshot.quotes());
                     remember(attempted,completed,true,!valid,false,null);
                 });

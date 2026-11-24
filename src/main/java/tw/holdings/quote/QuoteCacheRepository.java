@@ -39,15 +39,32 @@ class QuoteCacheRepository {
             )) n (lookup_date, code, status, stock_name, market, close_price, price_date,
                   last_attempt_at, next_attempt_at, failure_count, post_close_attempts)
             ON c.lookup_date = n.lookup_date AND c.code = n.code
-            WHEN MATCHED AND (
+            WHEN MATCHED AND (n.status <> 'FOUND' OR n.market = COALESCE(
+                (SELECT CASE e.kind WHEN 'RELISTED' THEN e.market ELSE 'DELISTED' END
+                 FROM market_event e WHERE e.code=n.code
+                    AND e.effective_date<=COALESCE(n.price_date,n.lookup_date)
+                    AND e.kind IN ('RELISTED','DELISTED')
+                 ORDER BY e.effective_date DESC, CASE e.kind WHEN 'RELISTED' THEN 0 ELSE 1 END
+                 FETCH FIRST 1 ROW ONLY),n.market)) AND (
                 n.status <> 'FOUND' OR c.price_date IS NULL
-                OR (n.price_date IS NOT NULL AND n.price_date >= c.price_date)
+                OR (n.price_date IS NOT NULL AND (n.price_date > c.price_date
+                    OR (n.price_date = c.price_date AND (n.market = c.market OR c.market IS NULL
+                        OR n.market = (SELECT e.market FROM market_event e WHERE e.code = n.code
+                            AND e.effective_date <= n.price_date AND e.kind IN ('RELISTED','DELISTED')
+                            ORDER BY e.effective_date DESC, CASE e.kind WHEN 'RELISTED' THEN 0 ELSE 1 END
+                            FETCH FIRST 1 ROW ONLY)))))
             ) THEN UPDATE SET
                 status = n.status, stock_name = n.stock_name, market = n.market,
                 close_price = n.close_price, price_date = n.price_date,
                 last_attempt_at = n.last_attempt_at, next_attempt_at = n.next_attempt_at,
                 failure_count = n.failure_count, post_close_attempts = n.post_close_attempts
-            WHEN NOT MATCHED THEN INSERT
+            WHEN NOT MATCHED AND (n.status <> 'FOUND' OR n.market = COALESCE(
+                (SELECT CASE e.kind WHEN 'RELISTED' THEN e.market ELSE 'DELISTED' END
+                 FROM market_event e WHERE e.code=n.code
+                    AND e.effective_date<=COALESCE(n.price_date,n.lookup_date)
+                    AND e.kind IN ('RELISTED','DELISTED')
+                 ORDER BY e.effective_date DESC, CASE e.kind WHEN 'RELISTED' THEN 0 ELSE 1 END
+                 FETCH FIRST 1 ROW ONLY),n.market)) THEN INSERT
                 (lookup_date, code, status, stock_name, market, close_price, price_date,
                  last_attempt_at, next_attempt_at, failure_count, post_close_attempts)
             VALUES (n.lookup_date, n.code, n.status, n.stock_name, n.market, n.close_price,
@@ -154,6 +171,7 @@ class QuoteCacheRepository {
             QuoteResult prior = latest.get(item.getKey());
             // 官方批次檔可能較晚更新，保留較新的實際交易價格。
             if (prior != null && prior.priceDate() != null
+                    && (prior.market()==result.market() || result.priceDate()!=null)
                     && (result.priceDate() == null || result.priceDate().isBefore(prior.priceDate()))) {
                 result = prior;
             }
